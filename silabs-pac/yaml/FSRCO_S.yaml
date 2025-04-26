@@ -1,0 +1,15 @@
+block/FSRCO_S:
+  description: FSRCO_S Registers
+  items:
+  - name: IPVERSION
+    description: No Description
+    byte_offset: 0
+    access: Read
+    fieldset: IPVERSION
+fieldset/IPVERSION:
+  description: No Description
+  fields:
+  - name: IPVERSION
+    description: IP Version
+    bit_offset: 0
+    bit_size: 32

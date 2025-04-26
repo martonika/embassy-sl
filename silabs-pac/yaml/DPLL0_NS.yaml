@@ -1,0 +1,165 @@
+block/DPLL0_NS:
+  description: DPLL0_NS Registers
+  items:
+  - name: IPVERSION
+    description: No Description
+    byte_offset: 0
+    access: Read
+    fieldset: IPVERSION
+  - name: EN
+    description: No Description
+    byte_offset: 4
+    fieldset: EN
+  - name: CFG
+    description: No Description
+    byte_offset: 8
+    fieldset: CFG
+  - name: CFG1
+    description: No Description
+    byte_offset: 12
+    fieldset: CFG1
+  - name: IF
+    description: No Description
+    byte_offset: 16
+    fieldset: IF
+  - name: IEN
+    description: No Description
+    byte_offset: 20
+    fieldset: IEN
+  - name: STATUS
+    description: No Description
+    byte_offset: 24
+    access: Read
+    fieldset: STATUS
+  - name: LOCK
+    description: No Description
+    byte_offset: 36
+    access: Write
+    fieldset: LOCK
+fieldset/CFG:
+  description: No Description
+  fields:
+  - name: MODE
+    description: Operating Mode Control
+    bit_offset: 0
+    bit_size: 1
+    enum: MODE
+  - name: EDGESEL
+    description: Reference Edge Select
+    bit_offset: 1
+    bit_size: 1
+  - name: AUTORECOVER
+    description: Automatic Recovery Control
+    bit_offset: 2
+    bit_size: 1
+  - name: DITHEN
+    description: Dither Enable Control
+    bit_offset: 6
+    bit_size: 1
+fieldset/CFG1:
+  description: No Description
+  fields:
+  - name: M
+    description: Factor M
+    bit_offset: 0
+    bit_size: 12
+  - name: N
+    description: Factor N
+    bit_offset: 16
+    bit_size: 12
+fieldset/EN:
+  description: No Description
+  fields:
+  - name: EN
+    description: Module Enable
+    bit_offset: 0
+    bit_size: 1
+  - name: DISABLING
+    description: Disablement Busy Status
+    bit_offset: 1
+    bit_size: 1
+fieldset/IEN:
+  description: No Description
+  fields:
+  - name: LOCK
+    description: LOCK interrupt Enable
+    bit_offset: 0
+    bit_size: 1
+  - name: LOCKFAILLOW
+    description: LOCKFAILLOW Interrupe Enable
+    bit_offset: 1
+    bit_size: 1
+  - name: LOCKFAILHIGH
+    description: LOCKFAILHIGH Interrupt Enable
+    bit_offset: 2
+    bit_size: 1
+fieldset/IF:
+  description: No Description
+  fields:
+  - name: LOCK
+    description: Lock Interrupt Flag
+    bit_offset: 0
+    bit_size: 1
+  - name: LOCKFAILLOW
+    description: Lock Failure Low Interrupt Flag
+    bit_offset: 1
+    bit_size: 1
+  - name: LOCKFAILHIGH
+    description: Lock Failure High Interrupt Flag
+    bit_offset: 2
+    bit_size: 1
+fieldset/IPVERSION:
+  description: No Description
+  fields:
+  - name: IPVERSION
+    description: IP Version ID
+    bit_offset: 0
+    bit_size: 32
+fieldset/LOCK:
+  description: No Description
+  fields:
+  - name: LOCKKEY
+    description: Lock Key
+    bit_offset: 0
+    bit_size: 16
+    enum: LOCKKEY
+fieldset/STATUS:
+  description: No Description
+  fields:
+  - name: RDY
+    description: Ready Status
+    bit_offset: 0
+    bit_size: 1
+  - name: ENS
+    description: Enable Status
+    bit_offset: 1
+    bit_size: 1
+  - name: LOCK
+    description: Lock Status
+    bit_offset: 31
+    bit_size: 1
+    enum: LOCK
+enum/LOCK:
+  bit_size: 1
+  variants:
+  - name: UNLOCKED
+    description: DPLL is unlocked
+    value: 0
+  - name: LOCKED
+    description: DPLL is locked
+    value: 1
+enum/LOCKKEY:
+  bit_size: 16
+  variants:
+  - name: UNLOCK
+    description: Unlock code
+    value: 28930
+enum/MODE:
+  bit_size: 1
+  variants:
+  - name: FLL
+    description: Frequency Lock Mode
+    value: 0
+  - name: PLL
+    description: Phase Lock Mode
+    value: 1

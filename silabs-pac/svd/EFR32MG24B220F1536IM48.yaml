@@ -1,0 +1,11 @@
+# Note: manually copy-pasted <cpu> section from armv8m.svd before running svdtools patch
+_svd: EFR32MG24B220F1536IM48.svd
+
+GPIO_NS:
+  PORTB_DOUT:
+    _modify:
+      DOUT:
+        _write_constraint: [0, 63]
+
+_include:
+  - patch/3_prio_bits.yaml

@@ -1,0 +1,135 @@
+block/LDMAXBAR_NS:
+  description: LDMAXBAR_NS Registers
+  items:
+  - name: IPVERSION
+    description: No Description
+    byte_offset: 0
+    access: Read
+    fieldset: IPVERSION
+  - name: CH0_REQSEL
+    description: No Description
+    byte_offset: 4
+    fieldset: CH0_REQSEL
+  - name: CH1_REQSEL
+    description: No Description
+    byte_offset: 8
+    fieldset: CH1_REQSEL
+  - name: CH2_REQSEL
+    description: No Description
+    byte_offset: 12
+    fieldset: CH2_REQSEL
+  - name: CH3_REQSEL
+    description: No Description
+    byte_offset: 16
+    fieldset: CH3_REQSEL
+  - name: CH4_REQSEL
+    description: No Description
+    byte_offset: 20
+    fieldset: CH4_REQSEL
+  - name: CH5_REQSEL
+    description: No Description
+    byte_offset: 24
+    fieldset: CH5_REQSEL
+  - name: CH6_REQSEL
+    description: No Description
+    byte_offset: 28
+    fieldset: CH6_REQSEL
+  - name: CH7_REQSEL
+    description: No Description
+    byte_offset: 32
+    fieldset: CH7_REQSEL
+fieldset/CH0_REQSEL:
+  description: No Description
+  fields:
+  - name: SIGSEL
+    description: Signal Select
+    bit_offset: 0
+    bit_size: 4
+  - name: SOURCESEL
+    description: Source Select
+    bit_offset: 16
+    bit_size: 6
+fieldset/CH1_REQSEL:
+  description: No Description
+  fields:
+  - name: SIGSEL
+    description: Signal Select
+    bit_offset: 0
+    bit_size: 4
+  - name: SOURCESEL
+    description: Source Select
+    bit_offset: 16
+    bit_size: 6
+fieldset/CH2_REQSEL:
+  description: No Description
+  fields:
+  - name: SIGSEL
+    description: Signal Select
+    bit_offset: 0
+    bit_size: 4
+  - name: SOURCESEL
+    description: Source Select
+    bit_offset: 16
+    bit_size: 6
+fieldset/CH3_REQSEL:
+  description: No Description
+  fields:
+  - name: SIGSEL
+    description: Signal Select
+    bit_offset: 0
+    bit_size: 4
+  - name: SOURCESEL
+    description: Source Select
+    bit_offset: 16
+    bit_size: 6
+fieldset/CH4_REQSEL:
+  description: No Description
+  fields:
+  - name: SIGSEL
+    description: Signal Select
+    bit_offset: 0
+    bit_size: 4
+  - name: SOURCESEL
+    description: Source Select
+    bit_offset: 16
+    bit_size: 6
+fieldset/CH5_REQSEL:
+  description: No Description
+  fields:
+  - name: SIGSEL
+    description: Signal Select
+    bit_offset: 0
+    bit_size: 4
+  - name: SOURCESEL
+    description: Source Select
+    bit_offset: 16
+    bit_size: 6
+fieldset/CH6_REQSEL:
+  description: No Description
+  fields:
+  - name: SIGSEL
+    description: Signal Select
+    bit_offset: 0
+    bit_size: 4
+  - name: SOURCESEL
+    description: Source Select
+    bit_offset: 16
+    bit_size: 6
+fieldset/CH7_REQSEL:
+  description: No Description
+  fields:
+  - name: SIGSEL
+    description: Signal Select
+    bit_offset: 0
+    bit_size: 4
+  - name: SOURCESEL
+    description: Source Select
+    bit_offset: 16
+    bit_size: 6
+fieldset/IPVERSION:
+  description: No Description
+  fields:
+  - name: IPVERSION
+    description: IP Version ID
+    bit_offset: 0
+    bit_size: 32

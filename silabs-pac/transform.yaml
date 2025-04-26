@@ -1,0 +1,74 @@
+transforms:
+  # ==================== GPIO
+  # merge secure and nonsecure into a common gpio mod
+  # then gpio::s:: or gpio::ns:: differentiates between the two
+  - !Rename
+    from: gpio_ns::GpioNs
+    to: gpio::ns
+    type: All
+  - !Rename
+    from: gpio_s::GpioS
+    to: gpio::s
+    type: All
+  - !MergeFieldsets
+    from: gpio_(s|ns)::regs::Port([abcd])(.+)
+    to: gpio::regs::$3
+    check: NoCheck
+  - !MakeBlock
+    blocks: gpio::(s|ns)
+    from: port([abcd])_(.+)
+    to_outer: port_$1
+    to_inner: $2
+    to_block: gpio_p::GpioPort
+    # Not all registers have a mode high, and chiptool seems to generate with all(), not any()
+  - !AddRegisters
+    block: gpio_p::GpioPort
+    registers:
+      - name: modeh
+        description: mode high
+        byte_offset: 0x0C
+        access: ReadWrite
+        fieldset: gpio::regs::Modeh
+    # GPIO Enums
+  - !MergeEnums
+    from: gpio_n?s::vals::Port.Mode.Mode\d
+    to: gpio::vals::PortMode
+
+    # ModeH and ModeL
+  - !MergeFieldsets
+    from: gpio::regs::Mode(h|l)
+    to: gpio::regs::Mode
+    check: NoCheck
+  - !AddFields
+    fieldset: gpio::regs::Mode
+    fields:
+      - name: mode2
+        description: Mode N
+        bit_offset: 8
+        bit_size: 0x4
+        enum: gpio::vals::PortMode
+      - name: mode3
+        description: Mode N
+        bit_offset: 12
+        bit_size: 0x4
+        enum: gpio::vals::PortMode
+      - name: mode4
+        description: Mode N
+        bit_offset: 16
+        bit_size: 0x4
+        enum: gpio::vals::PortMode
+      - name: mode5
+        description: Mode N
+        bit_offset: 20
+        bit_size: 0x4
+        enum: gpio::vals::PortMode
+      - name: mode6
+        description: Mode N
+        bit_offset: 24
+        bit_size: 0x4
+        enum: gpio::vals::PortMode
+      - name: mode7
+        description: Mode N
+        bit_offset: 28
+        bit_size: 0x4
+        enum: gpio::vals::PortMode

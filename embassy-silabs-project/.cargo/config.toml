@@ -1,0 +1,8 @@
+[target.thumbv8m.main-none-eabi] # <-change for your platform
+runner = 'probe-rs run --chip EFR32MG24B220F1536IM48 --chip-description-path target-desc/EFR32MG24_Series.yaml --connect-under-reset'# --log-file log.txt' # <- change for your chip
+
+[build]
+target = "thumbv8m.main-none-eabi" # <-change for your platform
+
+[env]
+DEFMT_LOG = "trace" # <- can change to info, warn, or error

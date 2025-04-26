@@ -1,0 +1,48 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "cwd": "${workspaceRoot}",
+      "executable": "./target/thumbv8m.main-none-eabi/debug/embassy-silabs-project",
+      "name": "Debug with JLinkServer",
+      "request": "launch",
+      "type": "cortex-debug",
+      "servertype": "jlink",
+      "serverpath": "C:/Program Files/SEGGER/JLink_V824/JLinkGDBServerCL.exe",
+      "device": "EFR32MG24BxxxF1536",
+      "svdFile": "${workspaceRoot}/svd/EFR32MG24B220F1536IM48.svd.patched",
+      "interface": "swd",
+      "serialNumber": "",
+      "breakAfterReset": true,
+      "runToEntryPoint": "main",
+      "preLaunchTask": "rust: cargo build",
+      "rttConfig": {
+        "enabled": true,
+        "address": "auto",
+        //                "decoders": [
+        //                {
+        //                    "label": "",
+        //                    "port": 0,
+        //                    "type": "console"
+        //                }
+        //                ],
+        "decoders": [
+          {
+            "type": "advanced",
+            "decoder": "./rtt-defmt.js",
+            "config": {
+              "cwd": "${workspaceRoot}",
+              "executable": "./target/thumbv8m.main-none-eabi/debug/embassy-silabs-project"
+            },
+            "label": "RTT",
+            "port": 0,
+            "ports": [0]
+          }
+        ]
+      }
+    }
+  ]
+}

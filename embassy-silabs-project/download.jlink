@@ -1,0 +1,7 @@
+si 1
+speed 4000
+device EFR32MG24BXXXF1536
+erase
+loadfile D:\rust_proj\embassy-silabs-project\embassy-silabs.out
+r
+g
