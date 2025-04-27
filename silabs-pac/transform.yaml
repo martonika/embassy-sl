@@ -72,3 +72,14 @@ transforms:
         bit_offset: 28
         bit_size: 0x4
         enum: gpio::vals::PortMode
+
+  # RTC
+  - !Rename
+    from: sysrtc0_ns::Sysrtc0Ns
+    to: sysrtc::ns
+    type: All
+
+  - !Rename
+    from: sysrtc0_s::Sysrtc0s
+    to: sysrtc::s
+    type: All

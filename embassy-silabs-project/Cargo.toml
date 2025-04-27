@@ -26,10 +26,8 @@ silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = [
     "critical-section",
     "cortex-m-rt",
 ] }
-embassy-silabs = { version = "0.1.0", path = "../embassy-silabs", features = [
-    "rt",
-    "defmt",
-] }
+embassy-silabs = { version = "0.1.0", path = "../embassy-silabs" }
+static_cell = "2.1.0"
 
 [dev-dependencies]
-embedded-test = "0.6.0"
+embedded-test = "0.6.1"

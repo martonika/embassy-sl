@@ -1,8 +1,27 @@
-pub use silabs_pac as pac;
+pub mod pac {
+    pub use silabs_pac::*;
+
+    // nonsecure
+    #[cfg(feature = "_ns")]
+    #[doc(no_inline)]
+    pub use silabs_pac::{
+        CMU_NS as CMU, GPIO_NS as GPIO, LFRCO_NS as LFRCO, SYSRTC0_NS as SYSRTC,
+        TIMER0_NS as TIMER0, TIMER1_NS as TIMER1, TIMER2_NS as TIMER2, TIMER3_NS as TIMER3,
+        TIMER4_NS as TIMER4,
+    };
+}
 
 embassy_hal_internal::peripherals! {
     // RTC
     SYSRTC,
+    // Clock sources
+    LFRCO,
+    // Timers
+    TIMER0,
+    TIMER1,
+    TIMER2,
+    TIMER3,
+    TIMER4,
 
     // GPIO Port A
     PA_00,
@@ -84,4 +103,9 @@ impl_pin!(PD_04, 3, 4);
 impl_pin!(PD_05, 3, 5);
 
 // Embassy's own 'mod interrupt' macro
-//embassy_hal_internal::interrupt_mod!(P0, P1);
+embassy_hal_internal::interrupt_mod!(
+    //RTC
+    SYSRTC_APP, // Clock sources
+    LFRCO, // Timers
+    TIMER0, TIMER1, TIMER2, TIMER3, TIMER4,
+);

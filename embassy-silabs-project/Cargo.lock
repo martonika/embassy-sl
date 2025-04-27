@@ -190,7 +190,6 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41fea5ef5bed4d3468dfd44f5c9fa4cda8f54c86d4fb4ae683eacf9d39e2ea12"
 dependencies = [
- "defmt 0.3.100",
  "embassy-futures",
  "embassy-sync",
  "embassy-time",
@@ -240,7 +239,6 @@ source = "git+https://github.com/embassy-rs/embassy.git#8474e573fbde99adb3b6f038
 dependencies = [
  "cortex-m",
  "critical-section",
- "defmt 0.3.100",
  "num-traits",
 ]
 
@@ -251,10 +249,11 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "critical-section",
- "defmt 1.0.1",
  "embassy-embedded-hal",
  "embassy-hal-internal",
  "embassy-sync",
+ "embassy-time-driver",
+ "embassy-time-queue-utils",
  "embassy-usb-driver",
  "embedded-hal 1.0.0",
  "silabs-pac",
@@ -274,6 +273,7 @@ dependencies = [
  "embedded-test",
  "panic-probe",
  "silabs-pac",
+ "static_cell",
 ]
 
 [[package]]
@@ -284,7 +284,6 @@ checksum = "8d2c8cdff05a7a51ba0087489ea44b0b1d97a296ca6b1d6d1a33ea7423d34049"
 dependencies = [
  "cfg-if",
  "critical-section",
- "defmt 0.3.100",
  "embedded-io-async",
  "futures-sink",
  "futures-util",
@@ -318,13 +317,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "embassy-time-queue-utils"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc55c748d16908a65b166d09ce976575fb8852cf60ccd06174092b41064d8f83"
+dependencies = [
+ "embassy-executor",
+ "heapless 0.8.0",
+]
+
+[[package]]
 name = "embassy-usb-driver"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fc247028eae04174b6635104a35b1ed336aabef4654f5e87a8f32327d231970"
-dependencies = [
- "defmt 0.3.100",
-]
 
 [[package]]
 name = "embedded-hal"
@@ -383,9 +389,9 @@ dependencies = [
 
 [[package]]
 name = "embedded-test"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8086763edf59394e7a80680e379b9bc125c06abb509cdf38aa7d42a4913f5ac7"
+checksum = "457ea1f3ac1afe7e4855b61de3eabc32606679c0fc7ad0d0bf060e01c0c66b2a"
 dependencies = [
  "embedded-test-macros",
  "heapless 0.8.0",
@@ -396,9 +402,9 @@ dependencies = [
 
 [[package]]
 name = "embedded-test-macros"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbe551e5858af11e0cde264b2710a0e9f0d19954c35a0284ded7b95223190425"
+checksum = "832520ef06a9dd2970a9106f94aca45dc47b746d14dbecc0819a47a7b5c1b5be"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -549,6 +555,12 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "portable-atomic"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "350e9b48cbc6b0e028b0473b114454c6316e57336ee184ceab6e53f72c178b3e"
 
 [[package]]
 name = "proc-macro-error-attr2"
@@ -702,6 +714,15 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
+name = "static_cell"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89b0684884a883431282db1e4343f34afc2ff6996fe1f4a1664519b66e14c1e"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "strsim"

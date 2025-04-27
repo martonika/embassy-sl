@@ -9,3 +9,35 @@ GPIO_NS:
 
 _include:
   - patch/3_prio_bits.yaml
+
+SYSRTC0_NS:
+  _add:
+    _interrupts:
+      SYSRTC_APP:
+        description: RTC interrupt group 1 (user code)
+        value: 67
+      SYSRTC_SEQ:
+        description: RTC interrupt group 2
+        value: 68
+SYSRTC0_S:
+  _add:
+    _interrupts:
+      SYSRTC_APP:
+        description: RTC interrupt group 1 (user code)
+        value: 67
+      SYSRTC_SEQ:
+        description: RTC interrupt group 2
+        value: 68
+
+LFRCO_NS:
+  _add:
+    _interrupts:
+      LFRCO:
+        description: LFRCO interrupt
+        value: 23
+LFRCO_S:
+  _add:
+    _interrupts:
+      LFRCO:
+        description: LFRCO interrupt
+        value: 23

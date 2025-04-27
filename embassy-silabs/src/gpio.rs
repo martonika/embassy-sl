@@ -347,14 +347,14 @@ pub(crate) trait SealedPin {
     #[inline]
     fn mode_w(&self, val: vals::PortMode) {
         match self._pin() {
-            0 => self.mode_reg().write(|w| w.set_mode0(val)),
-            1 => self.mode_reg().write(|w| w.set_mode1(val)),
-            2 => self.mode_reg().write(|w| w.set_mode2(val)),
-            3 => self.mode_reg().write(|w| w.set_mode3(val)),
-            4 => self.mode_reg().write(|w| w.set_mode4(val)),
-            5 => self.mode_reg().write(|w| w.set_mode5(val)),
-            6 => self.mode_reg().write(|w| w.set_mode6(val)),
-            7 => self.mode_reg().write(|w| w.set_mode7(val)),
+            0 => self.mode_reg().modify(|w| w.set_mode0(val)),
+            1 => self.mode_reg().modify(|w| w.set_mode1(val)),
+            2 => self.mode_reg().modify(|w| w.set_mode2(val)),
+            3 => self.mode_reg().modify(|w| w.set_mode3(val)),
+            4 => self.mode_reg().modify(|w| w.set_mode4(val)),
+            5 => self.mode_reg().modify(|w| w.set_mode5(val)),
+            6 => self.mode_reg().modify(|w| w.set_mode6(val)),
+            7 => self.mode_reg().modify(|w| w.set_mode7(val)),
             _ => unsafe { unreachable_unchecked() },
         }
     }
@@ -364,7 +364,7 @@ pub(crate) trait SealedPin {
     fn set_high(&self) {
         let mut val = self.port().dout().read().dout();
         val |= 1 << self._pin();
-        self.port().dout().write(|w| w.set_dout(val));
+        self.port().dout().modify(|w| w.set_dout(val));
     }
 
     /// Set the output as low.
@@ -372,7 +372,7 @@ pub(crate) trait SealedPin {
     fn set_low(&self) {
         let mut val = self.port().dout().read().dout();
         val &= !(1 << self._pin());
-        self.port().dout().write(|w| w.set_dout(val));
+        self.port().dout().modify(|w| w.set_dout(val));
     }
 }
 
@@ -410,7 +410,7 @@ impl AnyPin {
     /// - `pin_port` should not in use by another driver.
     #[inline]
     pub unsafe fn steal(pin_port: u8) -> Peri<'static, Self> {
-        Peri::new_unchecked(Self { pin_port })
+        unsafe { Peri::new_unchecked(Self { pin_port }) }
     }
 }
 

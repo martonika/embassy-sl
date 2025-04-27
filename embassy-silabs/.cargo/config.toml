@@ -1,0 +1,5 @@
+[build]
+target = "thumbv8m.main-none-eabi" # <-change for your platform
+
+[env]
+DEFMT_LOG = "trace" # <- can change to info, warn, or error
