@@ -83,3 +83,21 @@ transforms:
     from: sysrtc0_s::Sysrtc0s
     to: sysrtc::s
     type: All
+
+  - !AddRegisters
+    block: sysrtc::ns
+    registers:
+      - name: grp0_if_clr
+        description: SYSRTC0 Group 0 Interrupt Clear
+        byte_offset: 0x2040
+        access: ReadWrite
+        fieldset: sysrtc0_ns::regs::Grp0If
+
+  - !AddRegisters
+    block: sysrtc::s
+    registers:
+      - name: grp0_if_clr
+        description: SYSRTC0 Group 0 Interrupt Clear
+        byte_offset: 0x2040
+        access: ReadWrite
+        fieldset: sysrtc0_s::regs::Grp0If

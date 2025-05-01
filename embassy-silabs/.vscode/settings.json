@@ -1,7 +1,5 @@
 {
-    "rust-analyzer.check.allTargets": false,
-    "rust-analyzer.check.extraArgs": [
-        "--target",
-        "thumbv8m.main-none-eabi"
-    ]
+  "rust-analyzer.check.allTargets": false,
+  "rust-analyzer.check.extraArgs": ["--target", "thumbv8m.main-none-eabi"],
+  "rust-analyzer.cargo.features": ["defmt"]
 }

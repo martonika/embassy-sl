@@ -14,19 +14,23 @@ cortex-m = { version = "0.7.7", features = [
 cortex-m-rt = "0.7.5"
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
-embassy-executor = { version = "0.7.0", features = [
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features = [
     "defmt",
     "arch-cortex-m",
     "executor-thread",
 ] }
-embassy-time = { version = "0.4.0", features = ["defmt"] }
-panic-probe = "1.0.0"
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", features = [
+    "defmt",
+] }
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = [
     "rt",
     "critical-section",
     "cortex-m-rt",
 ] }
-embassy-silabs = { version = "0.1.0", path = "../embassy-silabs" }
+embassy-silabs = { version = "0.1.0", path = "../embassy-silabs", features = [
+    "defmt",
+] }
 static_cell = "2.1.0"
 
 [dev-dependencies]
