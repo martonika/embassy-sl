@@ -6,12 +6,11 @@ use embassy_sync::blocking_mutex::CriticalSectionMutex as Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_time_driver::Driver;
 use embassy_time_queue_utils::Queue;
-use silabs_pac::sysrtc0_ns::regs::{Grp0Ctrl, Grp0If};
 
 use crate::interrupt::InterruptExt;
 use crate::{interrupt, pac};
 
-fn rtc() -> pac::sysrtc::ns {
+fn rtc() -> pac::sysrtc0::Sysrtc0 {
     pac::SYSRTC
 }
 
@@ -94,7 +93,7 @@ impl RtcDriver {
         // Maybe unnecessary
         pac::CMU
             .sysrtc0clkctrl()
-            .write(|w| w.set_clksel(pac::cmu_ns::vals::Sysrtc0clkctrlClksel::LFRCO));
+            .write(|w| w.set_clksel(pac::cmu::vals::Sysrtc0clkctrlClksel::LFRCO));
         // Set a compare to 0x8000_0000 - half overflow
         r.grp0_cmp0value().write(|w| w.set_cmp0value(0x8000_0000));
         // Enable the comparison and overflow interrupts

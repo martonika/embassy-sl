@@ -5,9 +5,20 @@ pub mod pac {
     #[cfg(feature = "_ns")]
     #[doc(no_inline)]
     pub use silabs_pac::{
-        CMU_NS as CMU, GPIO_NS as GPIO, LFRCO_NS as LFRCO, SYSRTC0_NS as SYSRTC,
-        TIMER0_NS as TIMER0, TIMER1_NS as TIMER1, TIMER2_NS as TIMER2, TIMER3_NS as TIMER3,
-        TIMER4_NS as TIMER4,
+        CMU_NS as CMU, EUSART0_NS as EUSART0, EUSART1_NS as EUSART1, GPIO_NS as GPIO,
+        LETIMER0_NS as LETIMER0, LFRCO_NS as LFRCO, SYSRTC0_NS as SYSRTC, TIMER0_NS as TIMER0,
+        TIMER1_NS as TIMER1, TIMER2_NS as TIMER2, TIMER3_NS as TIMER3, TIMER4_NS as TIMER4,
+        USART0_NS as USART0,
+    };
+
+    // secure
+    #[cfg(not(feature = "_ns"))]
+    #[doc(no_inline)]
+    pub use silabs_pac::{
+        CMU_S as CMU, EUSART0_S as EUSART0, EUSART1_S as EUSART1, GPIO_S as GPIO,
+        LETIMER0_S as LETIMER0, LFRCO_S as LFRCO, SYSRTC0_S as SYSRTC, TIMER0_S as TIMER0,
+        TIMER1_S as TIMER1, TIMER2_S as TIMER2, TIMER3_S as TIMER3, TIMER4_S as TIMER4,
+        USART0_S as USART0,
     };
 }
 
@@ -62,6 +73,31 @@ embassy_hal_internal::peripherals! {
     PD_03,
     PD_04,
     PD_05,
+
+    // USART
+    USART0_CTS,
+    USART0_RTS,
+    USART0_CS,
+    USART0_TX,
+    USART0_RX,
+    USART0_CLK,
+
+    // EUSART0
+    EUSART0_CTS,
+    EUSART0_RTS,
+    EUSART0_CS,
+    EUSART0_TX,
+    EUSART0_RX,
+    EUSART0_CLK,
+
+    // EUSART1
+    EUSART1_CTS,
+    EUSART1_RTS,
+    EUSART1_CS, // Usually driver enable
+    EUSART1_TX, // MOSI
+    EUSART1_RX, // MISO
+    EUSART1_CLK,
+
 }
 
 // In our implementation, pin_port is port_num*16 + pin_num,
@@ -104,8 +140,10 @@ impl_pin!(PD_05, 3, 5);
 
 // Embassy's own 'mod interrupt' macro
 embassy_hal_internal::interrupt_mod!(
-    //RTC
-    SYSRTC_APP, // Clock sources
-    LFRCO, // Timers
-    TIMER0, TIMER1, TIMER2, TIMER3, TIMER4,
+    SYSRTC_APP, //RTC
+    LFRCO,      // Clock sources
+    LETIMER0, TIMER0, TIMER1, TIMER2, TIMER3, TIMER4, // Timers
+    USART0_RX, USART0_TX, // USART0
+    EUSART0_RX, EUSART0_TX, // EUSART0
+    EUSART1_RX, EUSART1_TX, // EUSART1
 );

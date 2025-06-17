@@ -7,12 +7,14 @@ use core::hint::unreachable_unchecked;
 use embassy_hal_internal::{Peri, PeripheralType, impl_peripheral};
 
 use crate::chip::pac;
+#[cfg(feature = "_ns")]
 use pac::GPIO_NS as GPIO;
+#[cfg(not(feature = "_ns"))]
+use pac::GPIO_S as GPIO;
 use pac::common::*;
-use pac::gpio::ns as gpio;
-use pac::gpio::regs as gpio_regs;
+use pac::gpio;
+use pac::gpio::regs;
 use pac::gpio::vals;
-use pac::gpio_p as port;
 
 #[cfg(feature = "defmt")]
 use defmt::error;
@@ -295,18 +297,18 @@ pub(crate) trait SealedPin {
     }
 
     #[inline]
-    fn port(&self) -> port::GpioPort {
+    fn port(&self) -> gpio::Port {
         match self.pin_port() / 16 {
-            0 => gpio::port_a(GPIO),
-            1 => gpio::port_b(GPIO),
-            2 => gpio::port_c(GPIO),
-            3 => gpio::port_d(GPIO),
+            0 => gpio::Gpio::port_a(GPIO),
+            1 => gpio::Gpio::port_b(GPIO),
+            2 => gpio::Gpio::port_c(GPIO),
+            3 => gpio::Gpio::port_d(GPIO),
             _ => unsafe { unreachable_unchecked() },
         }
     }
 
     #[inline]
-    fn ctrl(&self) -> Reg<gpio_regs::Ctrl, RW> {
+    fn ctrl(&self) -> Reg<regs::Ctrl, RW> {
         self.port().ctrl()
     }
 
@@ -321,7 +323,7 @@ pub(crate) trait SealedPin {
     }
 
     #[inline]
-    fn mode_reg(&self) -> Reg<gpio_regs::Mode, RW> {
+    fn mode_reg(&self) -> Reg<regs::Mode, RW> {
         match self._pin() {
             0..=7 => self.port().model(),
             8 | 9 => self.port().modeh(),
@@ -387,12 +389,12 @@ pub trait Pin: PeripheralType + Into<AnyPin> + SealedPin + Sized + 'static {
 
     /// Port of the pin
     #[inline]
-    fn port(&self) -> port::GpioPort {
+    fn port(&self) -> gpio::Port {
         match self.pin_port() / 16 {
-            0 => gpio::port_a(GPIO),
-            1 => gpio::port_b(GPIO),
-            2 => gpio::port_c(GPIO),
-            3 => gpio::port_d(GPIO),
+            0 => gpio::Gpio::port_a(GPIO),
+            1 => gpio::Gpio::port_b(GPIO),
+            2 => gpio::Gpio::port_c(GPIO),
+            3 => gpio::Gpio::port_d(GPIO),
             _ => unsafe { unreachable_unchecked() },
         }
     }
