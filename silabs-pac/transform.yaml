@@ -102,21 +102,74 @@ transforms:
         fieldset: sysrtc0::regs::Grp0If
 
   # Timers
-
   # EFR32xG24: Timers 0&1 are 32 bit, 2 to 4 are 16 bit
   # LETimer is 24 bit, TBD
   #- !MergeEnums
   #  from: timer(0|1)::vals::(.*)
   #  to: timer32::vals::$2
-#
-#- !MergeFieldsets
-#  from: timer(0|1)::regs::(.*)
-#  to: timer32::regs::$3
-#
-#- !MergeEnums
-#  from: timer(2|3|4)::vals::(.*)
-#  to: timer16::vals::$2
-#
-#- !MergeFieldsets
-#  from: timer(2|3|4)::regs::(.*)
-#  to: timer16::regs::$3
+  #
+  #- !MergeFieldsets
+  #  from: timer(0|1)::regs::(.*)
+  #  to: timer32::regs::$3
+  #
+  #- !MergeEnums
+  #  from: timer(2|3|4)::vals::(.*)
+  #  to: timer16::vals::$2
+  #
+  #- !MergeFieldsets
+  #  from: timer(2|3|4)::regs::(.*)
+  #  to: timer16::regs::$3
+  # For now, handle EUSART and USART differently
+  # USART
+  - !MergeEnums
+    from: usart\d::vals::(.*)
+    to: usart::vals::$1
+    #skip_unmergeable: true
+
+  - !MergeFieldsets
+    from: usart\d::regs::(.*)
+    to: usart::regs::$1
+    check: Layout
+
+  - !MergeBlocks
+    from: usart\d::(.*)\d
+    to: usart::$1
+    type: All
+
+  # EUSART
+  - !MergeEnums
+    from: eusart\d::vals::(.*)
+    to: eusart::vals::$1
+    #skip_unmergeable: true
+
+  # This is not present in EUSART1, but needed for merge
+  # to be handled in code
+  - !AddFields
+    fieldset: eusart1::regs::Cfg1
+    fields:
+      - name: txdmawu
+        description: Transmitter DMA Wakeup
+        bit_offset: 9
+        bit_size: 1
+      - name: rxdmawu
+        description: Receiver DMA Wakeup
+        bit_offset: 10
+        bit_size: 1
+
+  - !AddFields
+    fieldset: eusart1::regs::I(en|f)
+    fields:
+      - name: cswu
+        description: CS Wake-up Enable
+        bit_offset: 16
+        bit_size: 1
+
+  - !MergeFieldsets
+    from: eusart\d::regs::(.*)
+    to: eusart::regs::$1
+    check: Layout
+
+  - !MergeBlocks
+    from: eusart\d::(.*)\d
+    to: eusart::$1
+    type: All
