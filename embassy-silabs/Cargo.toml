@@ -56,3 +56,4 @@ embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy.git", 
 
 embedded-hal = "1.0.0"
 silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = ["rt"] }
+futures-util = { version = "0.3.31", default-features = false }

@@ -1,10 +1,12 @@
 #![no_std]
 
+mod macros;
 mod time_driver;
 
 pub mod gpio;
-//pub mod timer;
-//pub mod usart;
+//pub mod timer_32b;
+pub mod time;
+pub mod usart;
 
 // This mod MUST go last, so that it sees all the `impl_foo!` macros
 #[cfg_attr(feature = "_xg24", path = "chips/efr32xg24.rs")]
@@ -29,11 +31,12 @@ pub fn init() -> Peripherals {
     // before doing anything important.
     let peripherals = Peripherals::take();
 
-    // Enable clock for GPIO
+    // Enable clocks
     pac::CMU.clken0().modify(|w| {
         w.set_gpio(true);
         w.set_sysrtc0(true);
         w.set_lfrco(true);
+        w.set_usart0(true);
     });
 
     time_driver::init(crate::interrupt::Priority::P0);

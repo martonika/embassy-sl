@@ -245,6 +245,7 @@ dependencies = [
  "embassy-time-driver",
  "embassy-time-queue-utils",
  "embedded-hal 1.0.0",
+ "futures-util",
  "silabs-pac",
 ]
 
