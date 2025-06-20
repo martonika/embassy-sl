@@ -6,7 +6,7 @@ mod time_driver;
 pub mod gpio;
 //pub mod timer_32b;
 pub mod time;
-pub mod usart;
+//pub mod usart;
 
 // This mod MUST go last, so that it sees all the `impl_foo!` macros
 #[cfg_attr(feature = "_xg24", path = "chips/efr32xg24.rs")]
