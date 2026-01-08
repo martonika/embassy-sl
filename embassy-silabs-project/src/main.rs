@@ -4,150 +4,88 @@
 use embassy_executor::Spawner;
 
 use defmt::*;
-use embassy_silabs::drivers::display::memlcd::{Config as SpiConfig, MemLcdSpi};
+use embassy_silabs::drivers::display::memlcd::{
+    extcomin_task_owned, MemLcd, MemLcdConfig, SpiConfig,
+};
 use embassy_silabs::gpio::*;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _}; // global logger
 
-// LS013B7DH03 Memory LCD constants
-const DISPLAY_WIDTH: usize = 128;
-const DISPLAY_HEIGHT: usize = 128;
-const SPI_FREQ: u32 = 1_100_000; // 1.1 MHz max
+// embedded-graphics imports
+use embedded_graphics::{
+    geometry::Point,
+    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    pixelcolor::BinaryColor,
+    prelude::*,
+    primitives::{Circle, PrimitiveStyle, Rectangle},
+    text::{Alignment, Text, TextStyleBuilder},
+    Drawable,
+};
 
-// Display commands
-const CMD_UPDATE: u8 = 0x01;
-const CMD_ALL_CLEAR: u8 = 0x04;
+// SPI frequency for memory LCD (1.1 MHz max)
+const SPI_FREQ: u32 = 1_100_000;
 
-// SCS timing (from datasheet)
-const SCS_SETUP_US: u64 = 6;
-const SCS_HOLD_US: u64 = 2;
+/// Draw the static text on the display
+fn draw_text<D>(display: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
+    let text_style = TextStyleBuilder::new().alignment(Alignment::Center).build();
 
-/// Memory LCD display driver
-struct MemLcd<'d, T: embassy_silabs::drivers::display::memlcd::Instance> {
-    spi: MemLcdSpi<'d, T>,
-    cs: Output<'d>,
-    enable: Output<'d>,
+    // "embassy-silabs" centered
+    Text::with_text_style("embassy-silabs", Point::new(64, 50), style, text_style).draw(display)?;
+
+    // "hello from Rust" centered below
+    Text::with_text_style("hello from Rust", Point::new(64, 65), style, text_style).draw(display)?;
+
+    Ok(())
 }
 
-impl<T: embassy_silabs::drivers::display::memlcd::Instance> MemLcd<'_, T> {
-    /// Power on the display by setting DISP_ENABLE high
-    pub fn power_on(&mut self) {
-        self.enable.set_high();
-    }
+/// Draw a graphical progress wheel (spinner) at the specified frame
+fn draw_spinner<D>(display: &mut D, frame: u32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let center = Point::new(64, 95);
+    let radius = 10i32;
 
-    /// Power off the display (give control back to board controller)
-    #[allow(dead_code)]
-    pub fn power_off(&mut self) {
-        self.enable.set_low();
-    }
+    // Draw outer circle
+    Circle::with_center(center, (radius * 2) as u32)
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+        .draw(display)?;
 
-    /// Clear the entire display
-    pub async fn clear(&mut self) {
-        // Assert CS
-        self.cs.set_high();
+    // Draw rotating indicator - 8 positions around the circle
+    let num_positions = 8u32;
+    let current_pos = frame % num_positions;
 
-        // SCS setup time
-        Timer::after_micros(SCS_SETUP_US).await;
+    for i in 0..num_positions {
+        let angle = (i as f32) * 2.0 * 3.14159 / (num_positions as f32);
+        let cos_a = libm::cosf(angle);
+        let sin_a = libm::sinf(angle);
 
-        // Send clear command (2 bytes: command + dummy)
-        let cmd: [u8; 2] = [CMD_ALL_CLEAR, 0x00];
-        self.spi.tx(&cmd).unwrap();
-        self.spi.wait();
+        let dot_x = center.x + ((radius - 3) as f32 * cos_a) as i32;
+        let dot_y = center.y + ((radius - 3) as f32 * sin_a) as i32;
 
-        // SCS hold time
-        Timer::after_micros(SCS_HOLD_US).await;
+        // Draw larger dot for current position, smaller for others
+        let dot_size = if i == current_pos { 4 } else { 2 };
 
-        // Deassert CS
-        self.cs.set_low();
+        // Only draw current and adjacent positions for spinning effect
+        let distance = ((i as i32 - current_pos as i32).abs()).min(
+            num_positions as i32 - (i as i32 - current_pos as i32).abs(),
+        );
 
-        // Flush any RX garbage
-        self.spi.rx_flush();
-    }
-
-    /// Draw pixel data to the display starting at the specified row
-    ///
-    /// Each row is 128 bits (16 bytes) of pixel data.
-    /// Data format: 1 bit per pixel, LSB first within each byte.
-    pub async fn draw(&mut self, data: &[u8], row_start: u8, row_count: u8) {
-        let row_len = DISPLAY_WIDTH / 8; // 16 bytes per row
-
-        // Assert CS
-        self.cs.set_high();
-
-        // SCS setup time
-        Timer::after_micros(SCS_SETUP_US).await;
-
-        // Line addresses are 1-indexed
-        let mut line_addr = row_start + 1;
-
-        // Send update command with first line address
-        // Format: [CMD_UPDATE, line_address]
-        let cmd: [u8; 2] = [CMD_UPDATE, line_addr];
-        self.spi.tx(&cmd).unwrap();
-
-        for i in 0..row_count {
-            // Send pixel data for this line
-            let start = (i as usize) * row_len;
-            let end = start + row_len;
-            if end <= data.len() {
-                self.spi.tx(&data[start..end]).unwrap();
-            }
-
-            // Send dummy data or next line address
-            if i == row_count - 1 {
-                // Last line: send dummy bytes
-                let dummy: [u8; 2] = [0xFF, 0xFF];
-                self.spi.tx(&dummy).unwrap();
-            } else {
-                // Next line address
-                line_addr += 1;
-                let next_line: [u8; 2] = [0xFF, line_addr];
-                self.spi.tx(&next_line).unwrap();
-            }
+        if distance <= 3 {
+            Rectangle::new(
+                Point::new(dot_x - dot_size / 2, dot_y - dot_size / 2),
+                embedded_graphics::geometry::Size::new(dot_size as u32, dot_size as u32),
+            )
+            .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
+            .draw(display)?;
         }
-
-        self.spi.wait();
-
-        // SCS hold time
-        Timer::after_micros(SCS_HOLD_US).await;
-
-        // Deassert CS
-        self.cs.set_low();
-
-        // Flush RX
-        self.spi.rx_flush();
     }
 
-    /// Draw a test pattern (checkerboard)
-    pub async fn draw_checkerboard(&mut self) {
-        // Create checkerboard pattern: alternating 8x8 blocks
-        let mut framebuf = [0u8; DISPLAY_WIDTH / 8 * DISPLAY_HEIGHT];
-
-        for row in 0..DISPLAY_HEIGHT {
-            for col_byte in 0..(DISPLAY_WIDTH / 8) {
-                let block_row = row / 8;
-                let block_col = col_byte;
-
-                // Alternate pattern based on block position
-                let pattern = if (block_row + block_col) % 2 == 0 {
-                    0xFF // White block
-                } else {
-                    0x00 // Black block
-                };
-
-                framebuf[row * (DISPLAY_WIDTH / 8) + col_byte] = pattern;
-            }
-        }
-
-        self.draw(&framebuf, 0, DISPLAY_HEIGHT as u8).await;
-    }
-
-    /// Fill the entire display with a solid color (true = white, false = black)
-    pub async fn fill(&mut self, white: bool) {
-        let pattern = if white { 0xFF } else { 0x00 };
-        let framebuf = [pattern; DISPLAY_WIDTH / 8 * DISPLAY_HEIGHT];
-        self.draw(&framebuf, 0, DISPLAY_HEIGHT as u8).await;
-    }
+    Ok(())
 }
 
 #[embassy_executor::main]
@@ -157,18 +95,6 @@ async fn main(spawner: Spawner) {
 
     // LED outputs for status indication
     let led0 = Output::new(p.PB_02, Level::Low); // BRD4187C + WPK
-    let led1 = Output::new(p.PB_04, Level::Low); // BRD4187C + WPK
-
-    // Memory LCD pins (BRD4187C)
-    // DISP_ENABLE / PC09 - Controls display ownership
-    // DISP_EXTCOMIN / PC06 - COM inversion signal (must toggle at ~60Hz)
-    // DISP_SI / PC01 - SPI MOSI
-    // DISP_SCLK / PC03 - SPI Clock
-    // DISP_SCS / PC08 - Chip Select (directly controlled, active high)
-
-    let disp_enable = Output::new(p.PC_09, Level::Low);
-    let disp_extcomin = Output::new(p.PC_06, Level::Low);
-    let disp_cs = Output::new(p.PC_08, Level::Low);
 
     // Configure SPI for memory LCD
     let mut spi_config = SpiConfig::default();
@@ -176,21 +102,27 @@ async fn main(spawner: Spawner) {
     // The LS013B7DH03 requires LSB-first bit order within each byte
     spi_config.reverse_bits = true;
 
-    // Create SPI driver using EUSART1 (per board config sl_memlcd_eusart_config.h)
-    // DISP_SI (MOSI) = PC01, DISP_SCLK = PC03
-    let spi = MemLcdSpi::new(p.EUSART1, p.PC_03, p.PC_01, spi_config);
+    // Configure MemLcd with auto EXTCOMIN toggling enabled
+    let lcd_config = MemLcdConfig::default();
 
-    // Create the display driver
-    let display = MemLcd {
-        spi,
-        cs: disp_cs,
-        enable: disp_enable,
-    };
+    // Create the display driver using the HAL MemLcd
+    let display = MemLcd::new_without_extcomin(
+        p.EUSART1,
+        p.PC_03, // SCLK
+        p.PC_01, // MOSI
+        p.PC_08, // CS
+        p.PC_09, // ENABLE
+        spi_config,
+        lcd_config,
+    );
+
+    // Create EXTCOMIN pin for the background task
+    let disp_extcomin = Output::new(p.PC_06, Level::Low);
 
     // Spawn tasks
     unwrap!(spawner.spawn(blink_led(led0)));
-    unwrap!(spawner.spawn(extcomin_toggle(disp_extcomin)));
-    unwrap!(spawner.spawn(display_demo(display, led1)));
+    unwrap!(spawner.spawn(extcomin_task_owned(disp_extcomin, 60)));
+    unwrap!(spawner.spawn(display_task(display)));
 }
 
 /// Blink LED0 as a heartbeat indicator
@@ -202,56 +134,32 @@ async fn blink_led(mut led: Output<'static>) {
     }
 }
 
-/// Toggle EXTCOMIN at ~60Hz to prevent display static buildup
+/// Display task: show text with animated spinner
 #[embassy_executor::task]
-async fn extcomin_toggle(mut extcomin: Output<'static>) {
-    // 60Hz = toggle every ~8.3ms (we toggle twice per cycle)
-    let mut ticker = Ticker::every(Duration::from_hz(120));
-
-    loop {
-        extcomin.toggle();
-        ticker.next().await;
-    }
-}
-
-/// Display demo: cycle through patterns
-#[embassy_executor::task]
-async fn display_demo(mut display: MemLcd<'static, embassy_silabs::peripherals::EUSART1>, mut led: Output<'static>) {
-    info!("Starting display demo");
+async fn display_task(mut display: MemLcd<'static, embassy_silabs::peripherals::EUSART1>) {
+    info!("Starting display");
 
     // Power on the display
     display.power_on();
-    Timer::after_millis(100).await; // Delay for power stabilization
+    Timer::after_millis(100).await;
 
     // Clear the display first
-    info!("Clearing display...");
-    display.clear().await;
-    led.toggle();
-    Timer::after_millis(1000).await;
+    display.clear_hw();
+    Timer::after_millis(100).await;
+
+    let mut frame: u32 = 0;
 
     loop {
-        // Show white fill
-        info!("Fill white");
-        display.fill(true).await;
-        led.toggle();
-        Timer::after_millis(2000).await;
+        // Redraw everything each frame
+        display.clear_buffer();
+        draw_text(&mut display).unwrap();
+        draw_spinner(&mut display, frame).unwrap();
+        display.flush_display();
 
-        // Show black fill
-        info!("Fill black");
-        display.fill(false).await;
-        led.toggle();
-        Timer::after_millis(2000).await;
+        // Advance animation
+        frame = frame.wrapping_add(1);
 
-        // Show checkerboard
-        info!("Checkerboard pattern");
-        display.draw_checkerboard().await;
-        led.toggle();
-        Timer::after_millis(2000).await;
-
-        // Clear
-        info!("Clear");
-        display.clear().await;
-        led.toggle();
-        Timer::after_millis(2000).await;
+        // Update at ~8 fps for smooth animation
+        Timer::after_millis(125).await;
     }
 }

@@ -29,10 +29,15 @@ _s = []
 
 _time-driver = [
     "dep:embassy-time-driver",
+    "dep:embassy-time",
+    "dep:embassy-executor",
     "embassy-time-driver?/tick-hz-32_768",
     "dep:embassy-time-queue-utils",
     "embassy-embedded-hal/time",
 ]
+
+## Memory LCD driver support (LS013B7DH03 and similar displays)
+memlcd-driver = ["dep:ls013b7dh03", "dep:embedded-graphics"]
 
 [dependencies]
 cortex-m = "0.7.7"
@@ -45,6 +50,9 @@ embassy-time = { git = "https://github.com/embassy-rs/embassy.git", optional = t
 embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", optional = true, features = [
     "tick-hz-32_768",
 ] }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", optional = true, features = [
+    "arch-cortex-m",
+] }
 embassy-hal-internal = { version = "0.2.0", features = [
     "cortex-m",
     "prio-bits-3",
@@ -56,7 +64,12 @@ embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy.git", 
 
 embedded-hal = "1.0.0"
 embedded-io = "0.6.1"
+embedded-graphics-core = "0.4"
 silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = ["rt"] }
 futures-util = { version = "0.3.31", default-features = false }
 bitflags = "2.9.1"
 embedded-io-async = "0.6.1"
+
+# Optional dependencies for memory LCD driver
+ls013b7dh03 = { version = "0.4", optional = true }
+embedded-graphics = { version = "0.8", optional = true }
