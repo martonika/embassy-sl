@@ -11,7 +11,7 @@
       "request": "launch",
       "type": "cortex-debug",
       "servertype": "jlink",
-      "serverpath": "C:/Program Files/SEGGER/JLink_V824/JLinkGDBServerCL.exe",
+      "serverpath": "/Applications/SEGGER/JLink_V794i/JLinkGDBServerCLExe",
       "device": "EFR32MG24BxxxF1536",
       "svdFile": "${workspaceRoot}/svd/EFR32MG24B220F1536IM48.svd.patched",
       "interface": "swd",

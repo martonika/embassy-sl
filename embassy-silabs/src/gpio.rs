@@ -7,10 +7,7 @@ use core::hint::unreachable_unchecked;
 use embassy_hal_internal::{Peri, PeripheralType, impl_peripheral};
 
 use crate::chip::pac;
-#[cfg(feature = "_ns")]
-use pac::GPIO_NS as GPIO;
-#[cfg(not(feature = "_ns"))]
-use pac::GPIO_S as GPIO;
+use pac::GPIO;
 use pac::common::*;
 use pac::gpio;
 use pac::gpio::regs;
@@ -333,7 +330,10 @@ pub(crate) trait SealedPin {
 
     #[inline]
     fn mode_r(&self) -> vals::PortMode {
-        match self._pin() {
+        // For pins 0-7, use MODEL with mode0-mode7
+        // For pins 8-15, use MODEH with mode0-mode7 (offset by 8)
+        let pin_offset = self._pin() % 8;
+        match pin_offset {
             0 => self.mode_reg().read().mode0(),
             1 => self.mode_reg().read().mode1(),
             2 => self.mode_reg().read().mode2(),
@@ -348,7 +348,10 @@ pub(crate) trait SealedPin {
 
     #[inline]
     fn mode_w(&self, val: vals::PortMode) {
-        match self._pin() {
+        // For pins 0-7, use MODEL with mode0-mode7
+        // For pins 8-15, use MODEH with mode0-mode7 (offset by 8)
+        let pin_offset = self._pin() % 8;
+        match pin_offset {
             0 => self.mode_reg().modify(|w| w.set_mode0(val)),
             1 => self.mode_reg().modify(|w| w.set_mode1(val)),
             2 => self.mode_reg().modify(|w| w.set_mode2(val)),

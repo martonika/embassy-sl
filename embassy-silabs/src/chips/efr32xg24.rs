@@ -1,3 +1,6 @@
+use crate::impl_eusart;
+use crate::impl_memlcd_spi;
+
 pub mod pac {
     pub use silabs_pac::*;
 
@@ -33,6 +36,9 @@ embassy_hal_internal::peripherals! {
     TIMER2,
     TIMER3,
     TIMER4,
+    // EUSART peripherals
+    EUSART0,
+    EUSART1,
 
     // GPIO Port A
     PA_00,
@@ -147,3 +153,11 @@ embassy_hal_internal::interrupt_mod!(
     EUSART0_RX, EUSART0_TX, // EUSART0
     EUSART1_RX, EUSART1_TX, // EUSART1
 );
+
+// EUSART peripheral implementations (UART mode)
+impl_eusart!(EUSART0, EUSART0, EUSART0_RX, EUSART0_TX, 0);
+impl_eusart!(EUSART1, EUSART1, EUSART1_RX, EUSART1_TX, 1);
+
+// EUSART peripheral implementations (SPI mode for memory LCD)
+impl_memlcd_spi!(EUSART0, EUSART0, 0);
+impl_memlcd_spi!(EUSART1, EUSART1, 1);

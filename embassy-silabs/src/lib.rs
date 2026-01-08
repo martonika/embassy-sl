@@ -3,10 +3,11 @@
 mod macros;
 mod time_driver;
 
+pub mod drivers;
 pub mod gpio;
 //pub mod timer_32b;
 pub mod time;
-//pub mod usart;
+pub mod usart;
 
 // This mod MUST go last, so that it sees all the `impl_foo!` macros
 #[cfg_attr(feature = "_xg24", path = "chips/efr32xg24.rs")]
@@ -38,8 +39,14 @@ pub fn init() -> Peripherals {
         w.set_lfrco(true);
         w.set_usart0(true);
     });
+    // EUSART clocks are in CLKEN1
+    pac::CMU.clken1().modify(|w| {
+        w.set_eusart0(true);
+        w.set_eusart1(true);
+    });
 
     time_driver::init(crate::interrupt::Priority::P0);
+    
 
     peripherals
 }

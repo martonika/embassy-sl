@@ -1,2030 +1,103 @@
 //! Enhanced Universal Synchronous/Asynchronous Receiver/Transmitter (EUSART)
+//!
+//! This driver provides async UART functionality for Silicon Labs EFR32 series MCUs.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use embassy_silabs::eusart::{Eusart, Config};
+//!
+//! let config = Config::default();
+//! let mut uart = Eusart::new(p.EUSART0, p.PA_05, p.PA_06, Irqs, config);
+//!
+//! uart.blocking_write(b"Hello, World!").unwrap();
+//! ```
 #![macro_use]
 #![warn(missing_docs)]
 
-use crate::chip::pac;
-
-use pac::eusart;
-
-use pac::gpio::vals::PortMode;
-
 use core::future::poll_fn;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicU8, Ordering, compiler_fence};
+use core::sync::atomic::{AtomicU8, Ordering};
 use core::task::Poll;
 
-use embassy_embedded_hal::SetConfig;
-use embassy_hal_internal::PeripheralType;
-use embassy_hal_internal::drop::OnDrop;
+use embassy_hal_internal::{Peri, PeripheralType};
 use embassy_sync::waitqueue::AtomicWaker;
-use futures_util::future::{Either, select};
 
-use crate::Peri;
-use crate::gpio::{AnyPin, SealedPin as _};
-use crate::interrupt::typelevel::Interrupt as _;
-use crate::interrupt::{self, Interrupt, InterruptExt};
-use crate::mode::{Async, Blocking, Mode};
-#[cfg(not(any(usart_v1, usart_v2)))]
-use crate::pac::usart::Lpuart as Regs;
-#[cfg(any(usart_v1, usart_v2))]
-use crate::pac::usart::Usart as Regs;
-use crate::pac::usart::{regs, vals};
-use crate::rcc::{RccInfo, SealedRccPeripheral};
-use crate::time::Hertz;
+use crate::chip::pac;
+use crate::gpio::{AnyPin, Pin as GpioPin, SealedPin as GpioSealedPin};
+use crate::interrupt;
+use crate::interrupt::typelevel::Interrupt;
 
-/// Interrupt handler.
-pub struct InterruptHandler<T: Instance> {
-    _phantom: PhantomData<T>,
-}
+// GPIO peripheral access
+#[cfg(feature = "_ns")]
+use pac::GPIO_NS as GPIO;
+#[cfg(not(feature = "_ns"))]
+use pac::GPIO_S as GPIO;
 
-impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandler<T> {
-    unsafe fn on_interrupt() {
-        on_interrupt(T::info().regs, T::state())
-    }
-}
+// Re-export PAC types for configuration
+pub use pac::eusart::regs::{Cfg0, Cfg1, Framecfg};
+pub use pac::eusart::vals::{Databits, Ovs, Parity, Stopbits};
 
-unsafe fn on_interrupt(r: Regs, s: &'static State) {
-    let (sr, cr1, cr3) = (sr(r).read(), r.cr1().read(), r.cr3().read());
-
-    let has_errors = (sr.pe() && cr1.peie()) || ((sr.fe() || sr.ne() || sr.ore()) && cr3.eie());
-    if has_errors {
-        // clear all interrupts and DMA Rx Request
-        r.cr1().modify(|w| {
-            // disable RXNE interrupt
-            w.set_rxneie(false);
-            // disable parity interrupt
-            w.set_peie(false);
-            // disable idle line interrupt
-            w.set_idleie(false);
-        });
-        r.cr3().modify(|w| {
-            // disable Error Interrupt: (Frame error, Noise error, Overrun error)
-            w.set_eie(false);
-            // disable DMA Rx Request
-            w.set_dmar(false);
-        });
-    } else if cr1.idleie() && sr.idle() {
-        // IDLE detected: no more data will come
-        r.cr1().modify(|w| {
-            // disable idle line detection
-            w.set_idleie(false);
-        });
-    } else if cr1.tcie() && sr.tc() {
-        // Transmission complete detected
-        r.cr1().modify(|w| {
-            // disable Transmission complete interrupt
-            w.set_tcie(false);
-        });
-    } else if cr1.rxneie() {
-        // We cannot check the RXNE flag as it is auto-cleared by the DMA controller
-
-        // It is up to the listener to determine if this in fact was a RX event and disable the RXNE detection
-    } else {
-        return;
-    }
-
-    compiler_fence(Ordering::SeqCst);
-    s.rx_waker.wake();
-    s.tx_waker.wake();
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-/// Number of data bits
-pub enum DataBits {
-    /// 7 Data Bits
-    DataBits7,
-    /// 8 Data Bits
-    DataBits8,
-    /// 9 Data Bits
-    DataBits9,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-/// Parity
-pub enum Parity {
-    /// No parity
-    ParityNone,
-    /// Even Parity
-    ParityEven,
-    /// Odd Parity
-    ParityOdd,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-/// Number of stop bits
-pub enum StopBits {
-    #[doc = "1 stop bit"]
-    STOP1,
-    #[doc = "0.5 stop bits"]
-    STOP0P5,
-    #[doc = "2 stop bits"]
-    STOP2,
-    #[doc = "1.5 stop bits"]
-    STOP1P5,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-/// Enables or disables receiver so written data are read back in half-duplex mode
-pub enum HalfDuplexReadback {
-    /// Disables receiver so written data are not read back
-    NoReadback,
-    /// Enables receiver so written data are read back
-    Readback,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-/// Duplex mode
-pub enum Duplex {
-    /// Full duplex
-    Full,
-    /// Half duplex with possibility to read back written data
-    Half(HalfDuplexReadback),
-}
-
-impl Duplex {
-    /// Returns true if half-duplex
-    fn is_half(&self) -> bool {
-        matches!(self, Duplex::Half(_))
-    }
-}
-
+/// EUSART configuration.
+#[derive(Clone)]
 #[non_exhaustive]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-/// Config Error
-pub enum ConfigError {
-    /// Baudrate too low
-    BaudrateTooLow,
-    /// Baudrate too high
-    BaudrateTooHigh,
-    /// Rx or Tx not enabled
-    RxOrTxNotEnabled,
-    /// Data bits and parity combination not supported
-    DataParityNotSupported,
-}
-
-#[non_exhaustive]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-/// Config
 pub struct Config {
-    /// Baud rate
+    /// Baud rate in bits per second.
     pub baudrate: u32,
-    /// Number of data bits
-    pub data_bits: DataBits,
-    /// Number of stop bits
-    pub stop_bits: StopBits,
-    /// Parity type
+    /// Number of data bits.
+    pub data_bits: Databits,
+    /// Parity mode.
     pub parity: Parity,
-
-    /// If true: on a read-like method, if there is a latent error pending,
-    /// the read will abort and the error will be reported and cleared
-    ///
-    /// If false: the error is ignored and cleared
-    pub detect_previous_overrun: bool,
-
-    /// Set this to true if the line is considered noise free.
-    /// This will increase the receiver’s tolerance to clock deviations,
-    /// but will effectively disable noise detection.
-    #[cfg(not(usart_v1))]
-    pub assume_noise_free: bool,
-
-    /// Set this to true to swap the RX and TX pins.
-    #[cfg(any(usart_v3, usart_v4))]
-    pub swap_rx_tx: bool,
-
-    /// Set this to true to invert TX pin signal values (V<sub>DD</sub> = 0/mark, Gnd = 1/idle).
-    #[cfg(any(usart_v3, usart_v4))]
-    pub invert_tx: bool,
-
-    /// Set this to true to invert RX pin signal values (V<sub>DD</sub> = 0/mark, Gnd = 1/idle).
-    #[cfg(any(usart_v3, usart_v4))]
-    pub invert_rx: bool,
-
-    /// Set the pull configuration for the RX pin.
-    pub rx_pull: Pull,
-
-    /// Set the pull configuration for the CTS pin.
-    pub cts_pull: Pull,
-
-    /// Set the pin configuration for the TX pin.
-    pub tx_config: OutputConfig,
-
-    /// Set the pin configuration for the RTS pin.
-    pub rts_config: OutputConfig,
-
-    /// Set the pin configuration for the DE pin.
-    pub de_config: OutputConfig,
-
-    // private: set by new_half_duplex, not by the user.
-    duplex: Duplex,
-}
-
-impl Config {
-    fn tx_af(&self) -> AfType {
-        #[cfg(any(usart_v3, usart_v4))]
-        if self.swap_rx_tx {
-            return AfType::input(self.rx_pull);
-        };
-        self.tx_config.af_type()
-    }
-
-    fn rx_af(&self) -> AfType {
-        #[cfg(any(usart_v3, usart_v4))]
-        if self.swap_rx_tx {
-            return self.tx_config.af_type();
-        };
-        AfType::input(self.rx_pull)
-    }
+    /// Number of stop bits.
+    pub stop_bits: Stopbits,
+    /// Oversampling rate. Use `Ovs::X16` for standard UART.
+    pub oversampling: Ovs,
+    /// Enable hardware flow control (CTS/RTS).
+    pub hw_flow_control: bool,
+    /// Disable majority voting (for noisy environments, keep false).
+    pub majority_vote_disable: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            baudrate: 115200,
-            data_bits: DataBits::DataBits8,
-            stop_bits: StopBits::STOP1,
-            parity: Parity::ParityNone,
-            // historical behavior
-            detect_previous_overrun: false,
-            #[cfg(not(usart_v1))]
-            assume_noise_free: false,
-            #[cfg(any(usart_v3, usart_v4))]
-            swap_rx_tx: false,
-            #[cfg(any(usart_v3, usart_v4))]
-            invert_tx: false,
-            #[cfg(any(usart_v3, usart_v4))]
-            invert_rx: false,
-            rx_pull: Pull::None,
-            cts_pull: Pull::None,
-            tx_config: OutputConfig::PushPull,
-            rts_config: OutputConfig::PushPull,
-            de_config: OutputConfig::PushPull,
-            duplex: Duplex::Full,
+            baudrate: 115_200,
+            data_bits: Databits::EIGHT,
+            parity: Parity::NONE,
+            stop_bits: Stopbits::ONE,
+            oversampling: Ovs::X16,
+            hw_flow_control: false,
+            majority_vote_disable: false,
         }
     }
 }
 
-/// Serial error
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+/// EUSART error types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[non_exhaustive]
 pub enum Error {
-    /// Framing error
+    /// Framing error - stop bit not detected.
     Framing,
-    /// Noise error
-    Noise,
-    /// RX buffer overrun
-    Overrun,
-    /// Parity check error
+    /// Parity error - parity check failed.
     Parity,
-    /// Buffer too large for DMA
-    BufferTooLong,
+    /// RX FIFO overflow - data lost.
+    Overflow,
+    /// RX FIFO underflow - read when empty.
+    Underflow,
+    /// TX FIFO overflow.
+    TxOverflow,
 }
 
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let message = match self {
-            Self::Framing => "Framing Error",
-            Self::Noise => "Noise Error",
-            Self::Overrun => "RX Buffer Overrun",
-            Self::Parity => "Parity Check Error",
-            Self::BufferTooLong => "Buffer too large for DMA",
-        };
-
-        write!(f, "{}", message)
-    }
-}
-
-impl core::error::Error for Error {}
-
-enum ReadCompletionEvent {
-    // DMA Read transfer completed first
-    DmaCompleted,
-    // Idle line detected first
-    Idle(usize),
-}
-
-/// Bidirectional UART Driver, which acts as a combination of [`UartTx`] and [`UartRx`].
-///
-/// ### Notes on [`embedded_io::Read`]
-///
-/// `embedded_io::Read` requires guarantees that the base [`UartRx`] cannot provide.
-///
-/// See [`UartRx`] for more details, and see [`BufferedUart`] and [`RingBufferedUartRx`]
-/// as alternatives that do provide the necessary guarantees for `embedded_io::Read`.
-pub struct Uart<'d, M: Mode> {
-    tx: UartTx<'d, M>,
-    rx: UartRx<'d, M>,
-}
-
-impl<'d, M: Mode> SetConfig for Uart<'d, M> {
-    type Config = Config;
-    type ConfigError = ConfigError;
-
-    fn set_config(&mut self, config: &Self::Config) -> Result<(), Self::ConfigError> {
-        self.tx.set_config(config)?;
-        self.rx.set_config(config)
-    }
-}
-
-/// Tx-only UART Driver.
-///
-/// Can be obtained from [`Uart::split`], or can be constructed independently,
-/// if you do not need the receiving half of the driver.
-pub struct UartTx<'d, M: Mode> {
-    info: &'static Info,
-    state: &'static State,
-    kernel_clock: Hertz,
-    tx: Option<Peri<'d, AnyPin>>,
-    cts: Option<Peri<'d, AnyPin>>,
-    de: Option<Peri<'d, AnyPin>>,
-    tx_dma: Option<ChannelAndRequest<'d>>,
-    duplex: Duplex,
-    _phantom: PhantomData<M>,
-}
-
-impl<'d, M: Mode> SetConfig for UartTx<'d, M> {
-    type Config = Config;
-    type ConfigError = ConfigError;
-
-    fn set_config(&mut self, config: &Self::Config) -> Result<(), Self::ConfigError> {
-        self.set_config(config)
-    }
-}
-
-/// Rx-only UART Driver.
-///
-/// Can be obtained from [`Uart::split`], or can be constructed independently,
-/// if you do not need the transmitting half of the driver.
-///
-/// ### Notes on [`embedded_io::Read`]
-///
-/// `embedded_io::Read` requires guarantees that this struct cannot provide:
-///
-/// - Any data received between calls to [`UartRx::read`] or [`UartRx::blocking_read`]
-/// will be thrown away, as `UartRx` is unbuffered.
-/// Users of `embedded_io::Read` are likely to not expect this behavior
-/// (for instance if they read multiple small chunks in a row).
-/// - [`UartRx::read`] and [`UartRx::blocking_read`] only return once the entire buffer has been
-/// filled, whereas `embedded_io::Read` requires us to fill the buffer with what we already
-/// received, and only block/wait until the first byte arrived.
-/// <br />
-/// While [`UartRx::read_until_idle`] does return early, it will still eagerly wait for data until
-/// the buffer is full or no data has been transmitted in a while,
-/// which may not be what users of `embedded_io::Read` expect.
-///
-/// [`UartRx::into_ring_buffered`] can be called to equip `UartRx` with a buffer,
-/// that it can then use to store data received between calls to `read`,
-/// provided you are using DMA already.
-///
-/// Alternatively, you can use [`BufferedUartRx`], which is interrupt-based and which can also
-/// store data received between calls.
-///
-/// Also see [this github comment](https://github.com/embassy-rs/embassy/pull/2185#issuecomment-1810047043).
-pub struct UartRx<'d, M: Mode> {
-    info: &'static Info,
-    state: &'static State,
-    kernel_clock: Hertz,
-    rx: Option<Peri<'d, AnyPin>>,
-    rts: Option<Peri<'d, AnyPin>>,
-    rx_dma: Option<ChannelAndRequest<'d>>,
-    detect_previous_overrun: bool,
-    #[cfg(any(usart_v1, usart_v2))]
-    buffered_sr: regs::Sr,
-    _phantom: PhantomData<M>,
-}
-
-impl<'d, M: Mode> SetConfig for UartRx<'d, M> {
-    type Config = Config;
-    type ConfigError = ConfigError;
-
-    fn set_config(&mut self, config: &Self::Config) -> Result<(), Self::ConfigError> {
-        self.set_config(config)
-    }
-}
-
-impl<'d> UartTx<'d, Async> {
-    /// Useful if you only want Uart Tx. It saves 1 pin and consumes a little less power.
-    pub fn new<T: Instance>(
-        peri: Peri<'d, T>,
-        tx: Peri<'d, impl TxPin<T>>,
-        tx_dma: Peri<'d, impl TxDma<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(tx, config.tx_af()),
-            None,
-            new_dma!(tx_dma),
-            config,
-        )
-    }
-
-    /// Create a new tx-only UART with a clear-to-send pin
-    pub fn new_with_cts<T: Instance>(
-        peri: Peri<'d, T>,
-        tx: Peri<'d, impl TxPin<T>>,
-        cts: Peri<'d, impl CtsPin<T>>,
-        tx_dma: Peri<'d, impl TxDma<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(tx, config.tx_af()),
-            new_pin!(cts, AfType::input(config.cts_pull)),
-            new_dma!(tx_dma),
-            config,
-        )
-    }
-
-    /// Initiate an asynchronous UART write
-    pub async fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        let r = self.info.regs;
-
-        half_duplex_set_rx_tx_before_write(
-            &r,
-            self.duplex == Duplex::Half(HalfDuplexReadback::Readback),
-        );
-
-        let ch = self.tx_dma.as_mut().unwrap();
-        r.cr3().modify(|reg| {
-            reg.set_dmat(true);
-        });
-        // If we don't assign future to a variable, the data register pointer
-        // is held across an await and makes the future non-Send.
-        let transfer = unsafe { ch.write(buffer, tdr(r), Default::default()) };
-        transfer.await;
-        Ok(())
-    }
-
-    /// Wait until transmission complete
-    pub async fn flush(&mut self) -> Result<(), Error> {
-        flush(&self.info, &self.state).await
-    }
-}
-
-impl<'d> UartTx<'d, Blocking> {
-    /// Create a new blocking tx-only UART with no hardware flow control.
-    ///
-    /// Useful if you only want Uart Tx. It saves 1 pin and consumes a little less power.
-    pub fn new_blocking<T: Instance>(
-        peri: Peri<'d, T>,
-        tx: Peri<'d, impl TxPin<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(peri, new_pin!(tx, config.tx_af()), None, None, config)
-    }
-
-    /// Create a new blocking tx-only UART with a clear-to-send pin
-    pub fn new_blocking_with_cts<T: Instance>(
-        peri: Peri<'d, T>,
-        tx: Peri<'d, impl TxPin<T>>,
-        cts: Peri<'d, impl CtsPin<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(tx, config.tx_af()),
-            new_pin!(cts, AfType::input(config.cts_pull)),
-            None,
-            config,
-        )
-    }
-}
-
-impl<'d, M: Mode> UartTx<'d, M> {
-    fn new_inner<T: Instance>(
-        _peri: Peri<'d, T>,
-        tx: Option<Peri<'d, AnyPin>>,
-        cts: Option<Peri<'d, AnyPin>>,
-        tx_dma: Option<ChannelAndRequest<'d>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        let mut this = Self {
-            info: T::info(),
-            state: T::state(),
-            kernel_clock: T::frequency(),
-            tx,
-            cts,
-            de: None,
-            tx_dma,
-            duplex: config.duplex,
-            _phantom: PhantomData,
-        };
-        this.enable_and_configure(&config)?;
-        Ok(this)
-    }
-
-    fn enable_and_configure(&mut self, config: &Config) -> Result<(), ConfigError> {
-        let info = self.info;
-        let state = self.state;
-        state.tx_rx_refcount.store(1, Ordering::Relaxed);
-
-        info.rcc.enable_and_reset();
-
-        info.regs.cr3().modify(|w| {
-            w.set_ctse(self.cts.is_some());
-        });
-        configure(info, self.kernel_clock, config, false, true)?;
-
-        Ok(())
-    }
-
-    /// Reconfigure the driver
-    pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
-        reconfigure(self.info, self.kernel_clock, config)
-    }
-
-    /// Perform a blocking UART write
-    pub fn blocking_write(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        let r = self.info.regs;
-
-        half_duplex_set_rx_tx_before_write(
-            &r,
-            self.duplex == Duplex::Half(HalfDuplexReadback::Readback),
-        );
-
-        for &b in buffer {
-            while !sr(r).read().txe() {}
-            unsafe { tdr(r).write_volatile(b) };
-        }
-        Ok(())
-    }
-
-    /// Block until transmission complete
-    pub fn blocking_flush(&mut self) -> Result<(), Error> {
-        blocking_flush(self.info)
-    }
-
-    /// Send break character
-    pub fn send_break(&self) {
-        send_break(&self.info.regs);
-    }
-
-    /// Set baudrate
-    pub fn set_baudrate(&self, baudrate: u32) -> Result<(), ConfigError> {
-        set_baudrate(self.info, self.kernel_clock, baudrate)
-    }
-}
-
-/// Wait until transmission complete
-async fn flush(info: &Info, state: &State) -> Result<(), Error> {
-    let r = info.regs;
-    if r.cr1().read().te() && !sr(r).read().tc() {
-        r.cr1().modify(|w| {
-            // enable Transmission Complete interrupt
-            w.set_tcie(true);
-        });
-
-        compiler_fence(Ordering::SeqCst);
-
-        // future which completes when Transmission complete is detected
-        let abort = poll_fn(move |cx| {
-            state.tx_waker.register(cx.waker());
-
-            let sr = sr(r).read();
-            if sr.tc() {
-                // Transmission complete detected
-                return Poll::Ready(());
-            }
-
-            Poll::Pending
-        });
-
-        abort.await;
-    }
-
-    Ok(())
-}
-
-fn blocking_flush(info: &Info) -> Result<(), Error> {
-    let r = info.regs;
-    if r.cr1().read().te() {
-        while !sr(r).read().tc() {}
-    }
-
-    Ok(())
-}
-
-/// Send break character
-pub fn send_break(regs: &Regs) {
-    // Busy wait until previous break has been sent
-    #[cfg(any(usart_v1, usart_v2))]
-    while regs.cr1().read().sbk() {}
-    #[cfg(any(usart_v3, usart_v4))]
-    while regs.isr().read().sbkf() {}
-
-    // Send break right after completing the current character transmission
-    #[cfg(any(usart_v1, usart_v2))]
-    regs.cr1().modify(|w| w.set_sbk(true));
-    #[cfg(any(usart_v3, usart_v4))]
-    regs.rqr().write(|w| w.set_sbkrq(true));
-}
-
-/// Enable Transmitter and disable Receiver for Half-Duplex mode
-/// In case of readback, keep Receiver enabled
-fn half_duplex_set_rx_tx_before_write(r: &Regs, enable_readback: bool) {
-    let mut cr1 = r.cr1().read();
-    if r.cr3().read().hdsel() && !cr1.te() {
-        cr1.set_te(true);
-        cr1.set_re(enable_readback);
-        r.cr1().write_value(cr1);
-    }
-}
-
-impl<'d> UartRx<'d, Async> {
-    /// Create a new rx-only UART with no hardware flow control.
-    ///
-    /// Useful if you only want Uart Rx. It saves 1 pin and consumes a little less power.
-    pub fn new<T: Instance>(
-        peri: Peri<'d, T>,
-        _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
-        rx: Peri<'d, impl RxPin<T>>,
-        rx_dma: Peri<'d, impl RxDma<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            None,
-            new_dma!(rx_dma),
-            config,
-        )
-    }
-
-    /// Create a new rx-only UART with a request-to-send pin
-    pub fn new_with_rts<T: Instance>(
-        peri: Peri<'d, T>,
-        _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
-        rx: Peri<'d, impl RxPin<T>>,
-        rts: Peri<'d, impl RtsPin<T>>,
-        rx_dma: Peri<'d, impl RxDma<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            new_pin!(rts, config.rts_config.af_type()),
-            new_dma!(rx_dma),
-            config,
-        )
-    }
-
-    /// Initiate an asynchronous UART read
-    pub async fn read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
-        self.inner_read(buffer, false).await?;
-
-        Ok(())
-    }
-
-    /// Initiate an asynchronous read with idle line detection enabled
-    pub async fn read_until_idle(&mut self, buffer: &mut [u8]) -> Result<usize, Error> {
-        self.inner_read(buffer, true).await
-    }
-
-    async fn inner_read_run(
-        &mut self,
-        buffer: &mut [u8],
-        enable_idle_line_detection: bool,
-    ) -> Result<ReadCompletionEvent, Error> {
-        let r = self.info.regs;
-
-        // Call flush for Half-Duplex mode if some bytes were written and flush was not called.
-        // It prevents reading of bytes which have just been written.
-        if r.cr3().read().hdsel() && r.cr1().read().te() {
-            flush(&self.info, &self.state).await?;
-
-            // Disable Transmitter and enable Receiver after flush
-            r.cr1().modify(|reg| {
-                reg.set_re(true);
-                reg.set_te(false);
-            });
-        }
-
-        // make sure USART state is restored to neutral state when this future is dropped
-        let on_drop = OnDrop::new(move || {
-            // clear all interrupts and DMA Rx Request
-            r.cr1().modify(|w| {
-                // disable RXNE interrupt
-                w.set_rxneie(false);
-                // disable parity interrupt
-                w.set_peie(false);
-                // disable idle line interrupt
-                w.set_idleie(false);
-            });
-            r.cr3().modify(|w| {
-                // disable Error Interrupt: (Frame error, Noise error, Overrun error)
-                w.set_eie(false);
-                // disable DMA Rx Request
-                w.set_dmar(false);
-            });
-        });
-
-        let ch = self.rx_dma.as_mut().unwrap();
-
-        let buffer_len = buffer.len();
-
-        // Start USART DMA
-        // will not do anything yet because DMAR is not yet set
-        // future which will complete when DMA Read request completes
-        let transfer = unsafe { ch.read(rdr(r), buffer, Default::default()) };
-
-        // clear ORE flag just before enabling DMA Rx Request: can be mandatory for the second transfer
-        if !self.detect_previous_overrun {
-            let sr = sr(r).read();
-            // This read also clears the error and idle interrupt flags on v1.
-            unsafe { rdr(r).read_volatile() };
-            clear_interrupt_flags(r, sr);
-        }
-
-        r.cr1().modify(|w| {
-            // disable RXNE interrupt
-            w.set_rxneie(false);
-            // enable parity interrupt if not ParityNone
-            w.set_peie(w.pce());
-        });
-
-        r.cr3().modify(|w| {
-            // enable Error Interrupt: (Frame error, Noise error, Overrun error)
-            w.set_eie(true);
-            // enable DMA Rx Request
-            w.set_dmar(true);
-        });
-
-        compiler_fence(Ordering::SeqCst);
-
-        // In case of errors already pending when reception started, interrupts may have already been raised
-        // and lead to reception abortion (Overrun error for instance). In such a case, all interrupts
-        // have been disabled in interrupt handler and DMA Rx Request has been disabled.
-
-        let cr3 = r.cr3().read();
-
-        if !cr3.dmar() {
-            // something went wrong
-            // because the only way to get this flag cleared is to have an interrupt
-
-            // DMA will be stopped when transfer is dropped
-
-            let sr = sr(r).read();
-            // This read also clears the error and idle interrupt flags on v1.
-            unsafe { rdr(r).read_volatile() };
-            clear_interrupt_flags(r, sr);
-
-            if sr.pe() {
-                return Err(Error::Parity);
-            }
-            if sr.fe() {
-                return Err(Error::Framing);
-            }
-            if sr.ne() {
-                return Err(Error::Noise);
-            }
-            if sr.ore() {
-                return Err(Error::Overrun);
-            }
-
-            unreachable!();
-        }
-
-        if enable_idle_line_detection {
-            // clear idle flag
-            let sr = sr(r).read();
-            // This read also clears the error and idle interrupt flags on v1.
-            unsafe { rdr(r).read_volatile() };
-            clear_interrupt_flags(r, sr);
-
-            // enable idle interrupt
-            r.cr1().modify(|w| {
-                w.set_idleie(true);
-            });
-        }
-
-        compiler_fence(Ordering::SeqCst);
-
-        // future which completes when idle line or error is detected
-        let s = self.state;
-        let abort = poll_fn(move |cx| {
-            s.rx_waker.register(cx.waker());
-
-            let sr = sr(r).read();
-
-            // This read also clears the error and idle interrupt flags on v1.
-            unsafe { rdr(r).read_volatile() };
-            clear_interrupt_flags(r, sr);
-
-            if enable_idle_line_detection {
-                // enable idle interrupt
-                r.cr1().modify(|w| {
-                    w.set_idleie(true);
-                });
-            }
-
-            compiler_fence(Ordering::SeqCst);
-
-            let has_errors = sr.pe() || sr.fe() || sr.ne() || sr.ore();
-
-            if has_errors {
-                // all Rx interrupts and Rx DMA Request have already been cleared in interrupt handler
-
-                if sr.pe() {
-                    return Poll::Ready(Err(Error::Parity));
-                }
-                if sr.fe() {
-                    return Poll::Ready(Err(Error::Framing));
-                }
-                if sr.ne() {
-                    return Poll::Ready(Err(Error::Noise));
-                }
-                if sr.ore() {
-                    return Poll::Ready(Err(Error::Overrun));
-                }
-            }
-
-            if enable_idle_line_detection && sr.idle() {
-                // Idle line detected
-                return Poll::Ready(Ok(()));
-            }
-
-            Poll::Pending
-        });
-
-        // wait for the first of DMA request or idle line detected to completes
-        // select consumes its arguments
-        // when transfer is dropped, it will stop the DMA request
-        let r = match select(transfer, abort).await {
-            // DMA transfer completed first
-            Either::Left(((), _)) => Ok(ReadCompletionEvent::DmaCompleted),
-
-            // Idle line detected first
-            Either::Right((Ok(()), transfer)) => Ok(ReadCompletionEvent::Idle(
-                buffer_len - transfer.get_remaining_transfers() as usize,
-            )),
-
-            // error occurred
-            Either::Right((Err(e), _)) => Err(e),
-        };
-
-        drop(on_drop);
-
-        r
-    }
-
-    async fn inner_read(
-        &mut self,
-        buffer: &mut [u8],
-        enable_idle_line_detection: bool,
-    ) -> Result<usize, Error> {
-        if buffer.is_empty() {
-            return Ok(0);
-        } else if buffer.len() > 0xFFFF {
-            return Err(Error::BufferTooLong);
-        }
-
-        let buffer_len = buffer.len();
-
-        // wait for DMA to complete or IDLE line detection if requested
-        let res = self
-            .inner_read_run(buffer, enable_idle_line_detection)
-            .await;
-
-        match res {
-            Ok(ReadCompletionEvent::DmaCompleted) => Ok(buffer_len),
-            Ok(ReadCompletionEvent::Idle(n)) => Ok(n),
-            Err(e) => Err(e),
-        }
-    }
-}
-
-impl<'d> UartRx<'d, Blocking> {
-    /// Create a new rx-only UART with no hardware flow control.
-    ///
-    /// Useful if you only want Uart Rx. It saves 1 pin and consumes a little less power.
-    pub fn new_blocking<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(peri, new_pin!(rx, config.rx_af()), None, None, config)
-    }
-
-    /// Create a new rx-only UART with a request-to-send pin
-    pub fn new_blocking_with_rts<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        rts: Peri<'d, impl RtsPin<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            new_pin!(rts, config.rts_config.af_type()),
-            None,
-            config,
-        )
-    }
-}
-
-impl<'d, M: Mode> UartRx<'d, M> {
-    fn new_inner<T: Instance>(
-        _peri: Peri<'d, T>,
-        rx: Option<Peri<'d, AnyPin>>,
-        rts: Option<Peri<'d, AnyPin>>,
-        rx_dma: Option<ChannelAndRequest<'d>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        let mut this = Self {
-            _phantom: PhantomData,
-            info: T::info(),
-            state: T::state(),
-            kernel_clock: T::frequency(),
-            rx,
-            rts,
-            rx_dma,
-            detect_previous_overrun: config.detect_previous_overrun,
-            #[cfg(any(usart_v1, usart_v2))]
-            buffered_sr: regs::Sr(0),
-        };
-        this.enable_and_configure(&config)?;
-        Ok(this)
-    }
-
-    fn enable_and_configure(&mut self, config: &Config) -> Result<(), ConfigError> {
-        let info = self.info;
-        let state = self.state;
-        state.tx_rx_refcount.store(1, Ordering::Relaxed);
-
-        info.rcc.enable_and_reset();
-
-        info.regs.cr3().write(|w| {
-            w.set_rtse(self.rts.is_some());
-        });
-        configure(info, self.kernel_clock, &config, true, false)?;
-
-        info.interrupt.unpend();
-        unsafe { info.interrupt.enable() };
-
-        Ok(())
-    }
-
-    /// Reconfigure the driver
-    pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
-        reconfigure(self.info, self.kernel_clock, config)
-    }
-
-    #[cfg(any(usart_v1, usart_v2))]
-    fn check_rx_flags(&mut self) -> Result<bool, Error> {
-        let r = self.info.regs;
-        loop {
-            // Handle all buffered error flags.
-            if self.buffered_sr.pe() {
-                self.buffered_sr.set_pe(false);
-                return Err(Error::Parity);
-            } else if self.buffered_sr.fe() {
-                self.buffered_sr.set_fe(false);
-                return Err(Error::Framing);
-            } else if self.buffered_sr.ne() {
-                self.buffered_sr.set_ne(false);
-                return Err(Error::Noise);
-            } else if self.buffered_sr.ore() {
-                self.buffered_sr.set_ore(false);
-                return Err(Error::Overrun);
-            } else if self.buffered_sr.rxne() {
-                self.buffered_sr.set_rxne(false);
-                return Ok(true);
-            } else {
-                // No error flags from previous iterations were set: Check the actual status register
-                let sr = r.sr().read();
-                if !sr.rxne() {
-                    return Ok(false);
-                }
-
-                // Buffer the status register and let the loop handle the error flags.
-                self.buffered_sr = sr;
-            }
-        }
-    }
-
-    #[cfg(any(usart_v3, usart_v4))]
-    fn check_rx_flags(&mut self) -> Result<bool, Error> {
-        let r = self.info.regs;
-        let sr = r.isr().read();
-        if sr.pe() {
-            r.icr().write(|w| w.set_pe(true));
-            return Err(Error::Parity);
-        } else if sr.fe() {
-            r.icr().write(|w| w.set_fe(true));
-            return Err(Error::Framing);
-        } else if sr.ne() {
-            r.icr().write(|w| w.set_ne(true));
-            return Err(Error::Noise);
-        } else if sr.ore() {
-            r.icr().write(|w| w.set_ore(true));
-            return Err(Error::Overrun);
-        }
-        Ok(sr.rxne())
-    }
-
-    /// Read a single u8 if there is one available, otherwise return WouldBlock
-    pub(crate) fn nb_read(&mut self) -> Result<u8, nb::Error<Error>> {
-        let r = self.info.regs;
-        if self.check_rx_flags()? {
-            Ok(unsafe { rdr(r).read_volatile() })
-        } else {
-            Err(nb::Error::WouldBlock)
-        }
-    }
-
-    /// Perform a blocking read into `buffer`
-    pub fn blocking_read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
-        let r = self.info.regs;
-
-        // Call flush for Half-Duplex mode if some bytes were written and flush was not called.
-        // It prevents reading of bytes which have just been written.
-        if r.cr3().read().hdsel() && r.cr1().read().te() {
-            blocking_flush(self.info)?;
-
-            // Disable Transmitter and enable Receiver after flush
-            r.cr1().modify(|reg| {
-                reg.set_re(true);
-                reg.set_te(false);
-            });
-        }
-
-        for b in buffer {
-            while !self.check_rx_flags()? {}
-            unsafe { *b = rdr(r).read_volatile() }
-        }
-        Ok(())
-    }
-
-    /// Set baudrate
-    pub fn set_baudrate(&self, baudrate: u32) -> Result<(), ConfigError> {
-        set_baudrate(self.info, self.kernel_clock, baudrate)
-    }
-}
-
-impl<'d, M: Mode> Drop for UartTx<'d, M> {
-    fn drop(&mut self) {
-        self.tx.as_ref().map(|x| x.set_as_disconnected());
-        self.cts.as_ref().map(|x| x.set_as_disconnected());
-        self.de.as_ref().map(|x| x.set_as_disconnected());
-        drop_tx_rx(self.info, self.state);
-    }
-}
-
-impl<'d, M: Mode> Drop for UartRx<'d, M> {
-    fn drop(&mut self) {
-        self.rx.as_ref().map(|x| x.set_as_disconnected());
-        self.rts.as_ref().map(|x| x.set_as_disconnected());
-        drop_tx_rx(self.info, self.state);
-    }
-}
-
-fn drop_tx_rx(info: &Info, state: &State) {
-    // We cannot use atomic subtraction here, because it's not supported for all targets
-    let is_last_drop = critical_section::with(|_| {
-        let refcount = state.tx_rx_refcount.load(Ordering::Relaxed);
-        assert!(refcount >= 1);
-        state.tx_rx_refcount.store(refcount - 1, Ordering::Relaxed);
-        refcount == 1
-    });
-    if is_last_drop {
-        info.rcc.disable();
-    }
-}
-
-impl<'d> Uart<'d, Async> {
-    /// Create a new bidirectional UART
-    pub fn new<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        tx: Peri<'d, impl TxPin<T>>,
-        _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
-        tx_dma: Peri<'d, impl TxDma<T>>,
-        rx_dma: Peri<'d, impl RxDma<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            new_pin!(tx, config.tx_af()),
-            None,
-            None,
-            None,
-            new_dma!(tx_dma),
-            new_dma!(rx_dma),
-            config,
-        )
-    }
-
-    /// Create a new bidirectional UART with request-to-send and clear-to-send pins
-    pub fn new_with_rtscts<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        tx: Peri<'d, impl TxPin<T>>,
-        _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
-        rts: Peri<'d, impl RtsPin<T>>,
-        cts: Peri<'d, impl CtsPin<T>>,
-        tx_dma: Peri<'d, impl TxDma<T>>,
-        rx_dma: Peri<'d, impl RxDma<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            new_pin!(tx, config.tx_af()),
-            new_pin!(rts, config.rts_config.af_type()),
-            new_pin!(cts, AfType::input(config.cts_pull)),
-            None,
-            new_dma!(tx_dma),
-            new_dma!(rx_dma),
-            config,
-        )
-    }
-
-    #[cfg(not(any(usart_v1, usart_v2)))]
-    /// Create a new bidirectional UART with a driver-enable pin
-    pub fn new_with_de<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        tx: Peri<'d, impl TxPin<T>>,
-        _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
-        de: Peri<'d, impl DePin<T>>,
-        tx_dma: Peri<'d, impl TxDma<T>>,
-        rx_dma: Peri<'d, impl RxDma<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            new_pin!(tx, config.tx_af()),
-            None,
-            None,
-            new_pin!(de, config.de_config.af_type()),
-            new_dma!(tx_dma),
-            new_dma!(rx_dma),
-            config,
-        )
-    }
-
-    /// Create a single-wire half-duplex Uart transceiver on a single Tx pin.
-    ///
-    /// See [`new_half_duplex_on_rx`][`Self::new_half_duplex_on_rx`] if you would prefer to use an Rx pin
-    /// (when it is available for your chip). There is no functional difference between these methods, as both
-    /// allow bidirectional communication.
-    ///
-    /// The TX pin is always released when no data is transmitted. Thus, it acts as a standard
-    /// I/O in idle or in reception. It means that the I/O must be configured so that TX is
-    /// configured as alternate function open-drain with an external pull-up
-    /// Apart from this, the communication protocol is similar to normal USART mode. Any conflict
-    /// on the line must be managed by software (for instance by using a centralized arbiter).
-    #[doc(alias("HDSEL"))]
-    pub fn new_half_duplex<T: Instance>(
-        peri: Peri<'d, T>,
-        tx: Peri<'d, impl TxPin<T>>,
-        _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
-        tx_dma: Peri<'d, impl TxDma<T>>,
-        rx_dma: Peri<'d, impl RxDma<T>>,
-        mut config: Config,
-        readback: HalfDuplexReadback,
-    ) -> Result<Self, ConfigError> {
-        #[cfg(not(any(usart_v1, usart_v2)))]
-        {
-            config.swap_rx_tx = false;
-        }
-        config.duplex = Duplex::Half(readback);
-
-        Self::new_inner(
-            peri,
-            None,
-            new_pin!(tx, config.tx_af()),
-            None,
-            None,
-            None,
-            new_dma!(tx_dma),
-            new_dma!(rx_dma),
-            config,
-        )
-    }
-
-    /// Create a single-wire half-duplex Uart transceiver on a single Rx pin.
-    ///
-    /// See [`new_half_duplex`][`Self::new_half_duplex`] if you would prefer to use an Tx pin.
-    /// There is no functional difference between these methods, as both allow bidirectional communication.
-    ///
-    /// The pin is always released when no data is transmitted. Thus, it acts as a standard
-    /// I/O in idle or in reception.
-    /// Apart from this, the communication protocol is similar to normal USART mode. Any conflict
-    /// on the line must be managed by software (for instance by using a centralized arbiter).
-    #[cfg(not(any(usart_v1, usart_v2)))]
-    #[doc(alias("HDSEL"))]
-    pub fn new_half_duplex_on_rx<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
-        tx_dma: Peri<'d, impl TxDma<T>>,
-        rx_dma: Peri<'d, impl RxDma<T>>,
-        mut config: Config,
-        readback: HalfDuplexReadback,
-    ) -> Result<Self, ConfigError> {
-        config.swap_rx_tx = true;
-        config.duplex = Duplex::Half(readback);
-
-        Self::new_inner(
-            peri,
-            None,
-            None,
-            new_pin!(rx, config.rx_af()),
-            None,
-            None,
-            new_dma!(tx_dma),
-            new_dma!(rx_dma),
-            config,
-        )
-    }
-
-    /// Perform an asynchronous write
-    pub async fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        self.tx.write(buffer).await
-    }
-
-    /// Wait until transmission complete
-    pub async fn flush(&mut self) -> Result<(), Error> {
-        self.tx.flush().await
-    }
-
-    /// Perform an asynchronous read into `buffer`
-    pub async fn read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
-        self.rx.read(buffer).await
-    }
-
-    /// Perform an an asynchronous read with idle line detection enabled
-    pub async fn read_until_idle(&mut self, buffer: &mut [u8]) -> Result<usize, Error> {
-        self.rx.read_until_idle(buffer).await
-    }
-}
-
-impl<'d> Uart<'d, Blocking> {
-    /// Create a new blocking bidirectional UART.
-    pub fn new_blocking<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        tx: Peri<'d, impl TxPin<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            new_pin!(tx, config.tx_af()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            config,
-        )
-    }
-
-    /// Create a new bidirectional UART with request-to-send and clear-to-send pins
-    pub fn new_blocking_with_rtscts<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        tx: Peri<'d, impl TxPin<T>>,
-        rts: Peri<'d, impl RtsPin<T>>,
-        cts: Peri<'d, impl CtsPin<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            new_pin!(tx, config.tx_af()),
-            new_pin!(rts, config.rts_config.af_type()),
-            new_pin!(cts, AfType::input(config.cts_pull)),
-            None,
-            None,
-            None,
-            config,
-        )
-    }
-
-    #[cfg(not(any(usart_v1, usart_v2)))]
-    /// Create a new bidirectional UART with a driver-enable pin
-    pub fn new_blocking_with_de<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        tx: Peri<'d, impl TxPin<T>>,
-        de: Peri<'d, impl DePin<T>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        Self::new_inner(
-            peri,
-            new_pin!(rx, config.rx_af()),
-            new_pin!(tx, config.tx_af()),
-            None,
-            None,
-            new_pin!(de, config.de_config.af_type()),
-            None,
-            None,
-            config,
-        )
-    }
-
-    /// Create a single-wire half-duplex Uart transceiver on a single Tx pin.
-    ///
-    /// See [`new_half_duplex_on_rx`][`Self::new_half_duplex_on_rx`] if you would prefer to use an Rx pin
-    /// (when it is available for your chip). There is no functional difference between these methods, as both
-    /// allow bidirectional communication.
-    ///
-    /// The pin is always released when no data is transmitted. Thus, it acts as a standard
-    /// I/O in idle or in reception.
-    /// Apart from this, the communication protocol is similar to normal USART mode. Any conflict
-    /// on the line must be managed by software (for instance by using a centralized arbiter).
-    #[doc(alias("HDSEL"))]
-    pub fn new_blocking_half_duplex<T: Instance>(
-        peri: Peri<'d, T>,
-        tx: Peri<'d, impl TxPin<T>>,
-        mut config: Config,
-        readback: HalfDuplexReadback,
-    ) -> Result<Self, ConfigError> {
-        #[cfg(not(any(usart_v1, usart_v2)))]
-        {
-            config.swap_rx_tx = false;
-        }
-        config.duplex = Duplex::Half(readback);
-
-        Self::new_inner(
-            peri,
-            None,
-            new_pin!(tx, config.tx_af()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            config,
-        )
-    }
-
-    /// Create a single-wire half-duplex Uart transceiver on a single Rx pin.
-    ///
-    /// See [`new_half_duplex`][`Self::new_half_duplex`] if you would prefer to use an Tx pin.
-    /// There is no functional difference between these methods, as both allow bidirectional communication.
-    ///
-    /// The pin is always released when no data is transmitted. Thus, it acts as a standard
-    /// I/O in idle or in reception.
-    /// Apart from this, the communication protocol is similar to normal USART mode. Any conflict
-    /// on the line must be managed by software (for instance by using a centralized arbiter).
-    #[cfg(not(any(usart_v1, usart_v2)))]
-    #[doc(alias("HDSEL"))]
-    pub fn new_blocking_half_duplex_on_rx<T: Instance>(
-        peri: Peri<'d, T>,
-        rx: Peri<'d, impl RxPin<T>>,
-        mut config: Config,
-        readback: HalfDuplexReadback,
-    ) -> Result<Self, ConfigError> {
-        config.swap_rx_tx = true;
-        config.duplex = Duplex::Half(readback);
-
-        Self::new_inner(
-            peri,
-            None,
-            None,
-            new_pin!(rx, config.rx_af()),
-            None,
-            None,
-            None,
-            None,
-            config,
-        )
-    }
-}
-
-impl<'d, M: Mode> Uart<'d, M> {
-    fn new_inner<T: Instance>(
-        _peri: Peri<'d, T>,
-        rx: Option<Peri<'d, AnyPin>>,
-        tx: Option<Peri<'d, AnyPin>>,
-        rts: Option<Peri<'d, AnyPin>>,
-        cts: Option<Peri<'d, AnyPin>>,
-        de: Option<Peri<'d, AnyPin>>,
-        tx_dma: Option<ChannelAndRequest<'d>>,
-        rx_dma: Option<ChannelAndRequest<'d>>,
-        config: Config,
-    ) -> Result<Self, ConfigError> {
-        let info = T::info();
-        let state = T::state();
-        let kernel_clock = T::frequency();
-
-        let mut this = Self {
-            tx: UartTx {
-                _phantom: PhantomData,
-                info,
-                state,
-                kernel_clock,
-                tx,
-                cts,
-                de,
-                tx_dma,
-                duplex: config.duplex,
-            },
-            rx: UartRx {
-                _phantom: PhantomData,
-                info,
-                state,
-                kernel_clock,
-                rx,
-                rts,
-                rx_dma,
-                detect_previous_overrun: config.detect_previous_overrun,
-                #[cfg(any(usart_v1, usart_v2))]
-                buffered_sr: regs::Sr(0),
-            },
-        };
-        this.enable_and_configure(&config)?;
-        Ok(this)
-    }
-
-    fn enable_and_configure(&mut self, config: &Config) -> Result<(), ConfigError> {
-        let info = self.rx.info;
-        let state = self.rx.state;
-        state.tx_rx_refcount.store(2, Ordering::Relaxed);
-
-        info.rcc.enable_and_reset();
-
-        info.regs.cr3().write(|w| {
-            w.set_rtse(self.rx.rts.is_some());
-            w.set_ctse(self.tx.cts.is_some());
-            #[cfg(not(any(usart_v1, usart_v2)))]
-            w.set_dem(self.tx.de.is_some());
-        });
-        configure(info, self.rx.kernel_clock, config, true, true)?;
-
-        info.interrupt.unpend();
-        unsafe { info.interrupt.enable() };
-
-        Ok(())
-    }
-
-    /// Perform a blocking write
-    pub fn blocking_write(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        self.tx.blocking_write(buffer)
-    }
-
-    /// Block until transmission complete
-    pub fn blocking_flush(&mut self) -> Result<(), Error> {
-        self.tx.blocking_flush()
-    }
-
-    /// Read a single `u8` or return `WouldBlock`
-    pub(crate) fn nb_read(&mut self) -> Result<u8, nb::Error<Error>> {
-        self.rx.nb_read()
-    }
-
-    /// Perform a blocking read into `buffer`
-    pub fn blocking_read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
-        self.rx.blocking_read(buffer)
-    }
-
-    /// Split the Uart into a transmitter and receiver, which is
-    /// particularly useful when having two tasks correlating to
-    /// transmitting and receiving.
-    pub fn split(self) -> (UartTx<'d, M>, UartRx<'d, M>) {
-        (self.tx, self.rx)
-    }
-
-    /// Split the Uart into a transmitter and receiver by mutable reference,
-    /// which is particularly useful when having two tasks correlating to
-    /// transmitting and receiving.
-    pub fn split_ref(&mut self) -> (&mut UartTx<'d, M>, &mut UartRx<'d, M>) {
-        (&mut self.tx, &mut self.rx)
-    }
-
-    /// Send break character
-    pub fn send_break(&self) {
-        self.tx.send_break();
-    }
-
-    /// Set baudrate
-    pub fn set_baudrate(&self, baudrate: u32) -> Result<(), ConfigError> {
-        self.tx.set_baudrate(baudrate)?;
-        self.rx.set_baudrate(baudrate)?;
-        Ok(())
-    }
-}
-
-fn reconfigure(info: &Info, kernel_clock: Hertz, config: &Config) -> Result<(), ConfigError> {
-    info.interrupt.disable();
-    let r = info.regs;
-
-    let cr = r.cr1().read();
-    configure(info, kernel_clock, config, cr.re(), cr.te())?;
-
-    info.interrupt.unpend();
-    unsafe { info.interrupt.enable() };
-
-    Ok(())
-}
-
-fn calculate_brr(baud: u32, pclk: u32, presc: u32, mul: u32) -> u32 {
-    // The calculation to be done to get the BRR is `mul * pclk / presc / baud`
-    // To do this in 32-bit only we can't multiply `mul` and `pclk`
-    let clock = pclk / presc;
-
-    // The mul is applied as the last operation to prevent overflow
-    let brr = clock / baud * mul;
-
-    // The BRR calculation will be a bit off because of integer rounding.
-    // Because we multiplied our inaccuracy with mul, our rounding now needs to be in proportion to mul.
-    let rounding = ((clock % baud) * mul + (baud / 2)) / baud;
-
-    brr + rounding
-}
-
-fn set_baudrate(info: &Info, kernel_clock: Hertz, baudrate: u32) -> Result<(), ConfigError> {
-    info.interrupt.disable();
-
-    set_usart_baudrate(info, kernel_clock, baudrate)?;
-
-    info.interrupt.unpend();
-    unsafe { info.interrupt.enable() };
-
-    Ok(())
-}
-
-fn find_and_set_brr(
-    r: Regs,
-    kind: Kind,
-    kernel_clock: Hertz,
-    baudrate: u32,
-) -> Result<bool, ConfigError> {
-    #[cfg(not(usart_v4))]
-    static DIVS: [(u16, ()); 1] = [(1, ())];
-
-    #[cfg(usart_v4)]
-    static DIVS: [(u16, vals::Presc); 12] = [
-        (1, vals::Presc::DIV1),
-        (2, vals::Presc::DIV2),
-        (4, vals::Presc::DIV4),
-        (6, vals::Presc::DIV6),
-        (8, vals::Presc::DIV8),
-        (10, vals::Presc::DIV10),
-        (12, vals::Presc::DIV12),
-        (16, vals::Presc::DIV16),
-        (32, vals::Presc::DIV32),
-        (64, vals::Presc::DIV64),
-        (128, vals::Presc::DIV128),
-        (256, vals::Presc::DIV256),
-    ];
-
-    let (mul, brr_min, brr_max) = match kind {
-        #[cfg(any(usart_v3, usart_v4))]
-        Kind::Lpuart => {
-            trace!("USART: Kind::Lpuart");
-            (256, 0x300, 0x10_0000)
-        }
-        Kind::Uart => {
-            trace!("USART: Kind::Uart");
-            (1, 0x10, 0x1_0000)
-        }
-    };
-
-    let mut found_brr = None;
-    #[cfg(not(usart_v1))]
-    let mut over8 = false;
-    #[cfg(usart_v1)]
-    let over8 = false;
-
-    for &(presc, _presc_val) in &DIVS {
-        let brr = calculate_brr(baudrate, kernel_clock.0, presc as u32, mul);
-        trace!(
-            "USART: presc={}, div=0x{:08x} (mantissa = {}, fraction = {})",
-            presc,
-            brr,
-            brr >> 4,
-            brr & 0x0F
-        );
-
-        if brr < brr_min {
-            #[cfg(not(usart_v1))]
-            if brr * 2 >= brr_min && kind == Kind::Uart && !cfg!(usart_v1) {
-                over8 = true;
-                r.brr()
-                    .write_value(regs::Brr(((brr << 1) & !0xF) | (brr & 0x07)));
-                #[cfg(usart_v4)]
-                r.presc().write(|w| w.set_prescaler(_presc_val));
-                found_brr = Some(brr);
-                break;
-            }
-            return Err(ConfigError::BaudrateTooHigh);
-        }
-
-        if brr < brr_max {
-            r.brr().write_value(regs::Brr(brr));
-            #[cfg(usart_v4)]
-            r.presc().write(|w| w.set_prescaler(_presc_val));
-            found_brr = Some(brr);
-            break;
-        }
-    }
-
-    match found_brr {
-        Some(brr) => {
-            #[cfg(not(usart_v1))]
-            let oversampling = if over8 { "8 bit" } else { "16 bit" };
-            #[cfg(usart_v1)]
-            let oversampling = "default";
-            trace!(
-                "Using {} oversampling, desired baudrate: {}, actual baudrate: {}",
-                oversampling,
-                baudrate,
-                kernel_clock.0 / brr * mul
-            );
-            Ok(over8)
-        }
-        None => Err(ConfigError::BaudrateTooLow),
-    }
-}
-
-fn set_usart_baudrate(info: &Info, kernel_clock: Hertz, baudrate: u32) -> Result<(), ConfigError> {
-    let r = info.regs;
-    r.cr1().modify(|w| {
-        // disable uart
-        w.set_ue(false);
-    });
-
-    #[cfg(not(usart_v1))]
-    let over8 = find_and_set_brr(r, info.kind, kernel_clock, baudrate)?;
-    #[cfg(usart_v1)]
-    let _over8 = find_and_set_brr(r, info.kind, kernel_clock, baudrate)?;
-
-    r.cr1().modify(|w| {
-        // enable uart
-        w.set_ue(true);
-
-        #[cfg(not(usart_v1))]
-        w.set_over8(vals::Over8::from_bits(over8 as _));
-    });
-
-    Ok(())
-}
-
-fn configure(
-    info: &Info,
-    kernel_clock: Hertz,
-    config: &Config,
-    enable_rx: bool,
-    enable_tx: bool,
-) -> Result<(), ConfigError> {
-    let r = info.regs;
-    let kind = info.kind;
-
-    if !enable_rx && !enable_tx {
-        return Err(ConfigError::RxOrTxNotEnabled);
-    }
-
-    // UART must be disabled during configuration.
-    r.cr1().modify(|w| {
-        w.set_ue(false);
-    });
-
-    #[cfg(not(usart_v1))]
-    let over8 = find_and_set_brr(r, kind, kernel_clock, config.baudrate)?;
-    #[cfg(usart_v1)]
-    let _over8 = find_and_set_brr(r, kind, kernel_clock, config.baudrate)?;
-
-    r.cr2().write(|w| {
-        w.set_stop(match config.stop_bits {
-            StopBits::STOP0P5 => vals::Stop::STOP0P5,
-            StopBits::STOP1 => vals::Stop::STOP1,
-            StopBits::STOP1P5 => vals::Stop::STOP1P5,
-            StopBits::STOP2 => vals::Stop::STOP2,
-        });
-
-        #[cfg(any(usart_v3, usart_v4))]
-        {
-            w.set_txinv(config.invert_tx);
-            w.set_rxinv(config.invert_rx);
-            w.set_swap(config.swap_rx_tx);
-        }
-    });
-
-    r.cr3().modify(|w| {
-        #[cfg(not(usart_v1))]
-        w.set_onebit(config.assume_noise_free);
-        w.set_hdsel(config.duplex.is_half());
-    });
-
-    r.cr1().write(|w| {
-        // enable uart
-        w.set_ue(true);
-
-        if config.duplex.is_half() {
-            // The te and re bits will be set by write, read and flush methods.
-            // Receiver should be enabled by default for Half-Duplex.
-            w.set_te(false);
-            w.set_re(true);
-        } else {
-            // enable transceiver
-            w.set_te(enable_tx);
-            // enable receiver
-            w.set_re(enable_rx);
-        }
-
-        // configure word size and parity, since the parity bit is inserted into the MSB position,
-        // it increases the effective word size
-        match (config.parity, config.data_bits) {
-            (Parity::ParityNone, DataBits::DataBits8) => {
-                trace!("USART: m0: 8 data bits, no parity");
-                w.set_m0(vals::M0::BIT8);
-                #[cfg(any(usart_v3, usart_v4))]
-                w.set_m1(vals::M1::M0);
-                w.set_pce(false);
-            }
-            (Parity::ParityNone, DataBits::DataBits9) => {
-                trace!("USART: m0: 9 data bits, no parity");
-                w.set_m0(vals::M0::BIT9);
-                #[cfg(any(usart_v3, usart_v4))]
-                w.set_m1(vals::M1::M0);
-                w.set_pce(false);
-            }
-            #[cfg(any(usart_v3, usart_v4))]
-            (Parity::ParityNone, DataBits::DataBits7) => {
-                trace!("USART: m0: 7 data bits, no parity");
-                w.set_m0(vals::M0::BIT8);
-                w.set_m1(vals::M1::BIT7);
-                w.set_pce(false);
-            }
-            (Parity::ParityEven, DataBits::DataBits8) => {
-                trace!("USART: m0: 8 data bits, even parity");
-                w.set_m0(vals::M0::BIT9);
-                #[cfg(any(usart_v3, usart_v4))]
-                w.set_m1(vals::M1::M0);
-                w.set_pce(true);
-                w.set_ps(vals::Ps::EVEN);
-            }
-            (Parity::ParityEven, DataBits::DataBits7) => {
-                trace!("USART: m0: 7 data bits, even parity");
-                w.set_m0(vals::M0::BIT8);
-                #[cfg(any(usart_v3, usart_v4))]
-                w.set_m1(vals::M1::M0);
-                w.set_pce(true);
-                w.set_ps(vals::Ps::EVEN);
-            }
-            (Parity::ParityOdd, DataBits::DataBits8) => {
-                trace!("USART: m0: 8 data bits, odd parity");
-                w.set_m0(vals::M0::BIT9);
-                #[cfg(any(usart_v3, usart_v4))]
-                w.set_m1(vals::M1::M0);
-                w.set_pce(true);
-                w.set_ps(vals::Ps::ODD);
-            }
-            (Parity::ParityOdd, DataBits::DataBits7) => {
-                trace!("USART: m0: 7 data bits, odd parity");
-                w.set_m0(vals::M0::BIT8);
-                #[cfg(any(usart_v3, usart_v4))]
-                w.set_m1(vals::M1::M0);
-                w.set_pce(true);
-                w.set_ps(vals::Ps::ODD);
-            }
-            _ => {
-                return Err(ConfigError::DataParityNotSupported);
-            }
-        }
-        #[cfg(not(usart_v1))]
-        w.set_over8(vals::Over8::from_bits(over8 as _));
-        #[cfg(usart_v4)]
-        {
-            trace!("USART: set_fifoen: true (usart_v4)");
-            w.set_fifoen(true);
-        }
-
-        Ok(())
-    })?;
-
-    Ok(())
-}
-
-impl<'d, M: Mode> embedded_hal_02::serial::Read<u8> for UartRx<'d, M> {
-    type Error = Error;
-    fn read(&mut self) -> Result<u8, nb::Error<Self::Error>> {
-        self.nb_read()
-    }
-}
-
-impl<'d, M: Mode> embedded_hal_02::blocking::serial::Write<u8> for UartTx<'d, M> {
-    type Error = Error;
-    fn bwrite_all(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
-        self.blocking_write(buffer)
-    }
-    fn bflush(&mut self) -> Result<(), Self::Error> {
-        self.blocking_flush()
-    }
-}
-
-impl<'d, M: Mode> embedded_hal_02::serial::Read<u8> for Uart<'d, M> {
-    type Error = Error;
-    fn read(&mut self) -> Result<u8, nb::Error<Self::Error>> {
-        self.nb_read()
-    }
-}
-
-impl<'d, M: Mode> embedded_hal_02::blocking::serial::Write<u8> for Uart<'d, M> {
-    type Error = Error;
-    fn bwrite_all(&mut self, buffer: &[u8]) -> Result<(), Self::Error> {
-        self.blocking_write(buffer)
-    }
-    fn bflush(&mut self) -> Result<(), Self::Error> {
-        self.blocking_flush()
-    }
-}
-
-impl embedded_hal_nb::serial::Error for Error {
-    fn kind(&self) -> embedded_hal_nb::serial::ErrorKind {
-        match *self {
-            Self::Framing => embedded_hal_nb::serial::ErrorKind::FrameFormat,
-            Self::Noise => embedded_hal_nb::serial::ErrorKind::Noise,
-            Self::Overrun => embedded_hal_nb::serial::ErrorKind::Overrun,
-            Self::Parity => embedded_hal_nb::serial::ErrorKind::Parity,
-            Self::BufferTooLong => embedded_hal_nb::serial::ErrorKind::Other,
-        }
-    }
-}
-
-impl<'d, M: Mode> embedded_hal_nb::serial::ErrorType for Uart<'d, M> {
-    type Error = Error;
-}
-
-impl<'d, M: Mode> embedded_hal_nb::serial::ErrorType for UartTx<'d, M> {
-    type Error = Error;
-}
-
-impl<'d, M: Mode> embedded_hal_nb::serial::ErrorType for UartRx<'d, M> {
-    type Error = Error;
-}
-
-impl<'d, M: Mode> embedded_hal_nb::serial::Read for UartRx<'d, M> {
-    fn read(&mut self) -> nb::Result<u8, Self::Error> {
-        self.nb_read()
-    }
-}
-
-impl<'d, M: Mode> embedded_hal_nb::serial::Write for UartTx<'d, M> {
-    fn write(&mut self, char: u8) -> nb::Result<(), Self::Error> {
-        self.blocking_write(&[char]).map_err(nb::Error::Other)
-    }
-
-    fn flush(&mut self) -> nb::Result<(), Self::Error> {
-        self.blocking_flush().map_err(nb::Error::Other)
-    }
-}
-
-impl<'d, M: Mode> embedded_hal_nb::serial::Read for Uart<'d, M> {
-    fn read(&mut self) -> Result<u8, nb::Error<Self::Error>> {
-        self.nb_read()
-    }
-}
-
-impl<'d, M: Mode> embedded_hal_nb::serial::Write for Uart<'d, M> {
-    fn write(&mut self, char: u8) -> nb::Result<(), Self::Error> {
-        self.blocking_write(&[char]).map_err(nb::Error::Other)
-    }
-
-    fn flush(&mut self) -> nb::Result<(), Self::Error> {
-        self.blocking_flush().map_err(nb::Error::Other)
-    }
-}
-
-impl embedded_io::Error for Error {
-    fn kind(&self) -> embedded_io::ErrorKind {
-        embedded_io::ErrorKind::Other
-    }
-}
-
-impl<M: Mode> embedded_io::ErrorType for Uart<'_, M> {
-    type Error = Error;
-}
-
-impl<M: Mode> embedded_io::ErrorType for UartTx<'_, M> {
-    type Error = Error;
-}
-
-impl<M: Mode> embedded_io::Write for Uart<'_, M> {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.blocking_write(buf)?;
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        self.blocking_flush()
-    }
-}
-
-impl<M: Mode> embedded_io::Write for UartTx<'_, M> {
-    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.blocking_write(buf)?;
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> Result<(), Self::Error> {
-        self.blocking_flush()
-    }
-}
-
-impl embedded_io_async::Write for Uart<'_, Async> {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.write(buf).await?;
-        Ok(buf.len())
-    }
-
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.flush().await
-    }
-}
-
-impl embedded_io_async::Write for UartTx<'_, Async> {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.write(buf).await?;
-        Ok(buf.len())
-    }
-
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.flush().await
-    }
-}
-
-pub use buffered::*;
-
-pub use crate::usart::buffered::InterruptHandler as BufferedInterruptHandler;
-mod buffered;
-
-#[cfg(not(gpdma))]
-mod ringbuffered;
-#[cfg(not(gpdma))]
-pub use ringbuffered::RingBufferedUartRx;
-
-#[cfg(any(usart_v1, usart_v2))]
-fn tdr(r: crate::pac::usart::Usart) -> *mut u8 {
-    r.dr().as_ptr() as _
-}
-
-#[cfg(any(usart_v1, usart_v2))]
-fn rdr(r: crate::pac::usart::Usart) -> *mut u8 {
-    r.dr().as_ptr() as _
-}
-
-#[cfg(any(usart_v1, usart_v2))]
-fn sr(r: crate::pac::usart::Usart) -> crate::pac::common::Reg<regs::Sr, crate::pac::common::RW> {
-    r.sr()
-}
-
-#[cfg(any(usart_v1, usart_v2))]
-#[allow(unused)]
-fn clear_interrupt_flags(_r: Regs, _sr: regs::Sr) {
-    // On v1 the flags are cleared implicitly by reads and writes to DR.
-}
-
-#[cfg(any(usart_v3, usart_v4))]
-fn tdr(r: Regs) -> *mut u8 {
-    r.tdr().as_ptr() as _
-}
-
-#[cfg(any(usart_v3, usart_v4))]
-fn rdr(r: Regs) -> *mut u8 {
-    r.rdr().as_ptr() as _
-}
-
-#[cfg(any(usart_v3, usart_v4))]
-fn sr(r: Regs) -> crate::pac::common::Reg<regs::Isr, crate::pac::common::R> {
-    r.isr()
-}
-
-#[cfg(any(usart_v3, usart_v4))]
-#[allow(unused)]
-fn clear_interrupt_flags(r: Regs, sr: regs::Isr) {
-    r.icr().write(|w| *w = regs::Icr(sr.0));
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Uart,
-    #[cfg(any(usart_v3, usart_v4))]
-    #[allow(unused)]
-    Lpuart,
-}
-
-struct State {
-    rx_waker: AtomicWaker,
-    tx_waker: AtomicWaker,
-    tx_rx_refcount: AtomicU8,
+/// Internal state shared between driver instances.
+pub(crate) struct State {
+    pub(crate) rx_waker: AtomicWaker,
+    pub(crate) tx_waker: AtomicWaker,
+    pub(crate) tx_rx_refcount: AtomicU8,
 }
 
 impl State {
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             rx_waker: AtomicWaker::new(),
             tx_waker: AtomicWaker::new(),
@@ -2033,73 +106,774 @@ impl State {
     }
 }
 
-struct Info {
-    regs: Regs,
-    rcc: RccInfo,
-    interrupt: Interrupt,
-    kind: Kind,
+/// Interrupt handler for EUSART.
+pub struct InterruptHandler<T: Instance> {
+    _phantom: PhantomData<T>,
 }
 
-#[allow(private_interfaces)]
-pub(crate) trait SealedInstance: crate::rcc::RccPeripheral {
-    fn info() -> &'static Info;
+impl<T: Instance> interrupt::typelevel::Handler<T::RxInterrupt> for InterruptHandler<T> {
+    unsafe fn on_interrupt() {
+        let r = T::regs();
+        let s = T::state();
+
+        let if_flags = r.if_().read();
+
+        // Check for RX-related interrupts
+        if if_flags.rxfl() || if_flags.perr() || if_flags.ferr() || if_flags.rxof() {
+            // Disable the interrupts we're handling
+            r.ien().modify(|w| {
+                w.set_rxfl(false);
+                w.set_perr(false);
+                w.set_ferr(false);
+                w.set_rxof(false);
+            });
+            s.rx_waker.wake();
+        }
+    }
+}
+
+/// TX interrupt handler (separate from RX on Silicon Labs).
+pub struct TxInterruptHandler<T: Instance> {
+    _phantom: PhantomData<T>,
+}
+
+impl<T: Instance> interrupt::typelevel::Handler<T::TxInterrupt> for TxInterruptHandler<T> {
+    unsafe fn on_interrupt() {
+        let r = T::regs();
+        let s = T::state();
+
+        let if_flags = r.if_().read();
+
+        // Check for TX-related interrupts
+        if if_flags.txfl() || if_flags.txc() {
+            r.ien().modify(|w| {
+                w.set_txfl(false);
+                w.set_txc(false);
+            });
+            s.tx_waker.wake();
+        }
+    }
+}
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+/// Wait for SYNCBUSY register to clear specified bits.
+#[inline]
+fn eusart_sync(r: pac::eusart::Eusart, mask: u32) {
+    while (r.syncbusy().read().0 & mask) != 0 {}
+}
+
+/// Calculate and set the clock divider for the desired baud rate.
+///
+/// Based on the formula from the reference manual:
+/// CLKDIV = 256 * (fEUSART / (oversample * baudrate) - 1)
+///
+/// Or simplified for integer math:
+/// CLKDIV/8 = 32 * fEUSART / (oversample * baudrate) - 32
+fn set_baudrate(r: pac::eusart::Eusart, ref_freq: u32, baudrate: u32, ovs: Ovs) {
+    let oversample: u32 = match ovs {
+        Ovs::X16 => 16,
+        Ovs::X8 => 8,
+        Ovs::X6 => 6,
+        Ovs::X4 => 4,
+        Ovs::DISABLE => 1, // No oversampling (LF mode)
+        _ => 16,
+    };
+
+    // Use integer division with rounding
+    // clkdiv = (32 * refFreq) / (baudrate * oversample) - 32, then *8
+    let clkdiv = if oversample > 0 {
+        let div_intermediate = (32 * ref_freq) / (baudrate * oversample);
+        let clkdiv = (div_intermediate.saturating_sub(32)) * 8;
+        clkdiv & 0x007F_FFF8 // Mask to valid range (20-bit, lower 3 bits reserved)
+    } else {
+        0
+    };
+
+    // Wait for any pending sync
+    eusart_sync(r, 0x01); // SYNCBUSY_DIV
+
+    r.clkdiv().write(|w| w.set_div(clkdiv));
+
+    // Wait for sync to complete
+    eusart_sync(r, 0x01);
+}
+
+/// Properly disable the EUSART peripheral.
+fn eusart_disable(r: pac::eusart::Eusart) {
+    if r.en().read().en() {
+        // 1. Disable TX and RX
+        r.cmd().write(|w| {
+            w.set_txdis(true);
+            w.set_rxdis(true);
+        });
+
+        // 2. Wait for sync
+        eusart_sync(r, 0x18); // RXDIS | TXDIS bits
+
+        // 3. Wait for TX/RX to actually disable
+        while r.status().read().txens() || r.status().read().rxens() {}
+
+        // 4. Clear the enable bit
+        r.en().write(|w| w.set_en(false));
+
+        // 5. Wait for disabling to complete
+        while r.en().read().disabling() {}
+    }
+}
+
+/// Reset the EUSART to default state.
+fn eusart_reset(r: pac::eusart::Eusart) {
+    eusart_disable(r);
+
+    // Reset all configuration registers to defaults
+    r.cfg2().write(|_| {});
+    r.cfg1().write(|_| {});
+    r.cfg0().write(|_| {});
+    r.framecfg().write(|_| {});
+    r.dtxdatcfg().write(|_| {});
+    r.timingcfg().write(|_| {});
+    r.irhfcfg().write(|_| {});
+    r.irlfcfg().write(|_| {});
+    r.startframecfg().write(|_| {});
+    r.sigframecfg().write(|_| {});
+    r.trigctrl().write(|_| {});
+    r.ien().write(|_| {});
+
+    // Clear all interrupt flags
+    r.if_().write(|w| w.0 = 0xFFFF_FFFF);
+
+    r.clkdiv().write(|_| {});
+}
+
+// ============================================================================
+// EUSART Driver
+// ============================================================================
+
+/// EUSART driver supporting both TX and RX.
+pub struct Eusart<'d, T: Instance> {
+    tx: EusartTx<'d, T>,
+    rx: EusartRx<'d, T>,
+}
+
+impl<'d, T: Instance> Eusart<'d, T> {
+    /// Create a new EUSART driver without hardware flow control.
+    pub fn new(
+        eusart: Peri<'d, T>,
+        rx: Peri<'d, impl GpioPin>,
+        tx: Peri<'d, impl GpioPin>,
+        _irq: impl interrupt::typelevel::Binding<T::RxInterrupt, InterruptHandler<T>>
+            + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
+            + 'd,
+        config: Config,
+    ) -> Self {
+        Self::new_inner(eusart, rx.into(), tx.into(), None, None, config)
+    }
+
+    /// Create a new EUSART driver with hardware flow control (CTS/RTS).
+    pub fn new_with_rtscts(
+        eusart: Peri<'d, T>,
+        rx: Peri<'d, impl GpioPin>,
+        tx: Peri<'d, impl GpioPin>,
+        cts: Peri<'d, impl GpioPin>,
+        rts: Peri<'d, impl GpioPin>,
+        _irq: impl interrupt::typelevel::Binding<T::RxInterrupt, InterruptHandler<T>>
+            + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
+            + 'd,
+        config: Config,
+    ) -> Self {
+        Self::new_inner(
+            eusart,
+            rx.into(),
+            tx.into(),
+            Some(cts.into()),
+            Some(rts.into()),
+            config,
+        )
+    }
+
+    fn new_inner(
+        eusart: Peri<'d, T>,
+        rx: Peri<'d, AnyPin>,
+        tx: Peri<'d, AnyPin>,
+        cts: Option<Peri<'d, AnyPin>>,
+        rts: Option<Peri<'d, AnyPin>>,
+        config: Config,
+    ) -> Self {
+        let r = T::regs();
+
+        // Reset to known state
+        eusart_reset(r);
+
+        // Configure frame format
+        r.framecfg().write(|w| {
+            w.set_databits(config.data_bits);
+            w.set_parity(config.parity);
+            w.set_stopbits(config.stop_bits);
+        });
+
+        // Configure CFG0
+        r.cfg0().write(|w| {
+            w.set_ovs(config.oversampling);
+            w.set_mvdis(config.majority_vote_disable);
+        });
+
+        // Configure CFG1 for flow control
+        if config.hw_flow_control && cts.is_some() {
+            r.cfg1().modify(|w| {
+                w.set_ctsen(pac::eusart::vals::Ctsen::ENABLE);
+            });
+        }
+
+        // Enable the peripheral
+        r.en().write(|w| w.set_en(true));
+
+        // Set baud rate (must be done after enable)
+        // TODO: Get actual clock frequency from CMU
+        let ref_freq = 20_000_000; // Assume 20 MHz for now
+        set_baudrate(r, ref_freq, config.baudrate, config.oversampling);
+
+        // Configure GPIO pins
+        configure_rx_pin::<T>(&rx, &rts);
+        configure_tx_pin::<T>(&tx, &cts);
+
+        // Enable RX and TX
+        eusart_sync(r, 0xFF);
+        r.cmd().write(|w| {
+            w.set_rxen(true);
+            w.set_txen(true);
+        });
+        eusart_sync(r, 0x18); // Wait for RXEN/TXEN
+
+        // Wait for RX/TX to be enabled
+        while !r.status().read().rxens() || !r.status().read().txens() {}
+
+        // Wait for idle
+        while !r.status().read().rxidle() || !r.status().read().txidle() {}
+
+        // Enable interrupts
+        T::RxInterrupt::unpend();
+        T::TxInterrupt::unpend();
+        unsafe {
+            T::RxInterrupt::enable();
+            T::TxInterrupt::enable();
+        }
+
+        let s = T::state();
+        s.tx_rx_refcount.store(2, Ordering::Relaxed);
+
+        Self {
+            tx: EusartTx {
+                _p: unsafe { eusart.clone_unchecked() },
+            },
+            rx: EusartRx { _p: eusart },
+        }
+    }
+
+    /// Split the EUSART into separate TX and RX halves.
+    pub fn split(self) -> (EusartTx<'d, T>, EusartRx<'d, T>) {
+        (self.tx, self.rx)
+    }
+
+    /// Write bytes to the EUSART, blocking until complete.
+    pub fn blocking_write(&mut self, data: &[u8]) -> Result<(), Error> {
+        self.tx.blocking_write(data)
+    }
+
+    /// Read bytes from the EUSART, blocking until the buffer is filled.
+    pub fn blocking_read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
+        self.rx.blocking_read(buffer)
+    }
+
+    /// Asynchronously write bytes to the EUSART.
+    pub async fn write(&mut self, data: &[u8]) -> Result<(), Error> {
+        self.tx.write(data).await
+    }
+
+    /// Asynchronously read bytes from the EUSART.
+    pub async fn read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
+        self.rx.read(buffer).await
+    }
+
+    /// Flush the TX FIFO, waiting for all data to be transmitted.
+    pub fn blocking_flush(&mut self) -> Result<(), Error> {
+        self.tx.blocking_flush()
+    }
+}
+
+// ============================================================================
+// TX-only driver
+// ============================================================================
+
+/// Transmitter half of the EUSART driver.
+pub struct EusartTx<'d, T: Instance> {
+    _p: Peri<'d, T>,
+}
+
+impl<'d, T: Instance> EusartTx<'d, T> {
+    /// Blocking write to the EUSART.
+    pub fn blocking_write(&mut self, data: &[u8]) -> Result<(), Error> {
+        let r = T::regs();
+
+        for &byte in data {
+            // Wait for TX FIFO to have space
+            while !r.status().read().txfl() {}
+
+            r.txdata().write(|w| w.0 = byte as u32);
+        }
+
+        Ok(())
+    }
+
+    /// Asynchronously write bytes.
+    pub async fn write(&mut self, data: &[u8]) -> Result<(), Error> {
+        let r = T::regs();
+        let s = T::state();
+
+        for &byte in data {
+            // Wait for TX FIFO space using interrupt
+            poll_fn(|cx| {
+                s.tx_waker.register(cx.waker());
+
+                if r.status().read().txfl() {
+                    Poll::Ready(())
+                } else {
+                    // Enable TXFL interrupt
+                    r.ien().modify(|w| w.set_txfl(true));
+                    Poll::Pending
+                }
+            })
+            .await;
+
+            r.txdata().write(|w| w.0 = byte as u32);
+        }
+
+        Ok(())
+    }
+
+    /// Wait for all data to be transmitted.
+    pub fn blocking_flush(&mut self) -> Result<(), Error> {
+        let r = T::regs();
+
+        // Wait for TX complete
+        while !r.status().read().txc() {}
+
+        Ok(())
+    }
+
+    /// Asynchronously wait for all data to be transmitted.
+    pub async fn flush(&mut self) -> Result<(), Error> {
+        let r = T::regs();
+        let s = T::state();
+
+        poll_fn(|cx| {
+            s.tx_waker.register(cx.waker());
+
+            if r.status().read().txc() {
+                Poll::Ready(())
+            } else {
+                r.ien().modify(|w| w.set_txc(true));
+                Poll::Pending
+            }
+        })
+        .await;
+
+        Ok(())
+    }
+}
+
+impl<'d, T: Instance> Drop for EusartTx<'d, T> {
+    fn drop(&mut self) {
+        let r = T::regs();
+        let s = T::state();
+
+        if s.tx_rx_refcount.fetch_sub(1, Ordering::Relaxed) == 1 {
+            eusart_disable(r);
+            deconfigure_pins::<T>();
+        }
+    }
+}
+
+// ============================================================================
+// RX-only driver
+// ============================================================================
+
+/// Receiver half of the EUSART driver.
+pub struct EusartRx<'d, T: Instance> {
+    _p: Peri<'d, T>,
+}
+
+impl<'d, T: Instance> EusartRx<'d, T> {
+    /// Check and clear error flags.
+    fn check_errors(&self) -> Result<(), Error> {
+        let r = T::regs();
+        let if_flags = r.if_().read();
+
+        if if_flags.perr() {
+            r.if_().write(|w| w.set_perr(true)); // Clear flag
+            return Err(Error::Parity);
+        }
+        if if_flags.ferr() {
+            r.if_().write(|w| w.set_ferr(true));
+            return Err(Error::Framing);
+        }
+        if if_flags.rxof() {
+            r.if_().write(|w| w.set_rxof(true));
+            return Err(Error::Overflow);
+        }
+
+        Ok(())
+    }
+
+    /// Blocking read from the EUSART.
+    pub fn blocking_read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
+        let r = T::regs();
+
+        for byte in buffer.iter_mut() {
+            // Wait for RX FIFO to have data
+            while !r.status().read().rxfl() {
+                self.check_errors()?;
+            }
+
+            *byte = r.rxdata().read().rxdata() as u8;
+        }
+
+        Ok(())
+    }
+
+    /// Asynchronously read bytes.
+    pub async fn read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
+        let r = T::regs();
+        let s = T::state();
+
+        for byte in buffer.iter_mut() {
+            poll_fn(|cx| {
+                s.rx_waker.register(cx.waker());
+
+                // Check for errors first
+                let if_flags = r.if_().read();
+                if if_flags.perr() || if_flags.ferr() || if_flags.rxof() {
+                    return Poll::Ready(());
+                }
+
+                if r.status().read().rxfl() {
+                    Poll::Ready(())
+                } else {
+                    // Enable RXFL interrupt
+                    r.ien().modify(|w| {
+                        w.set_rxfl(true);
+                        w.set_perr(true);
+                        w.set_ferr(true);
+                        w.set_rxof(true);
+                    });
+                    Poll::Pending
+                }
+            })
+            .await;
+
+            self.check_errors()?;
+            *byte = r.rxdata().read().rxdata() as u8;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'d, T: Instance> Drop for EusartRx<'d, T> {
+    fn drop(&mut self) {
+        let r = T::regs();
+        let s = T::state();
+
+        if s.tx_rx_refcount.fetch_sub(1, Ordering::Relaxed) == 1 {
+            eusart_disable(r);
+            deconfigure_pins::<T>();
+        }
+    }
+}
+
+// ============================================================================
+// Pin configuration
+// ============================================================================
+
+/// Configure RX pin and optional RTS pin for the EUSART.
+fn configure_rx_pin<T: Instance>(rx: &Peri<'_, AnyPin>, rts: &Option<Peri<'_, AnyPin>>) {
+    // SAFETY: GPIO peripheral is a singleton, and we're only configuring routes
+    let gpio = unsafe { pac::gpio::Gpio::from_ptr(GPIO.as_ptr()) };
+
+    // Get port (0=A, 1=B, 2=C, 3=D) and pin number
+    let rx_port = rx.pin_port() / 16;
+    let rx_pin = rx.pin_port() % 16;
+
+    // Configure RX pin as input
+    rx.mode_w(pac::gpio::vals::PortMode::INPUT);
+
+    // Configure GPIO routing based on EUSART instance
+    match T::index() {
+        0 => {
+            // Set RX route: port and pin
+            gpio.eusart0_rxroute().write(|w| {
+                w.set_port(rx_port);
+                w.set_pin(rx_pin);
+            });
+            // Enable RX pin in route enable register
+            gpio.eusart0_routeen().modify(|w| w.set_rxpen(true));
+
+            // Configure RTS if provided
+            if let Some(rts_pin) = rts {
+                let rts_port = rts_pin.pin_port() / 16;
+                let rts_pin_num = rts_pin.pin_port() % 16;
+
+                // RTS is an output
+                rts_pin.mode_w(pac::gpio::vals::PortMode::PUSHPULL);
+                rts_pin.set_high();
+
+                gpio.eusart0_rtsroute().write(|w| {
+                    w.set_port(rts_port);
+                    w.set_pin(rts_pin_num);
+                });
+                gpio.eusart0_routeen().modify(|w| w.set_rtspen(true));
+            }
+        }
+        1 => {
+            gpio.eusart1_rxroute().write(|w| {
+                w.set_port(rx_port);
+                w.set_pin(rx_pin);
+            });
+            gpio.eusart1_routeen().modify(|w| w.set_rxpen(true));
+
+            if let Some(rts_pin) = rts {
+                let rts_port = rts_pin.pin_port() / 16;
+                let rts_pin_num = rts_pin.pin_port() % 16;
+
+                rts_pin.mode_w(pac::gpio::vals::PortMode::PUSHPULL);
+                rts_pin.set_high();
+
+                gpio.eusart1_rtsroute().write(|w| {
+                    w.set_port(rts_port);
+                    w.set_pin(rts_pin_num);
+                });
+                gpio.eusart1_routeen().modify(|w| w.set_rtspen(true));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Configure TX pin and optional CTS pin for the EUSART.
+fn configure_tx_pin<T: Instance>(tx: &Peri<'_, AnyPin>, cts: &Option<Peri<'_, AnyPin>>) {
+    // SAFETY: GPIO peripheral is a singleton, and we're only configuring routes
+    let gpio = unsafe { pac::gpio::Gpio::from_ptr(GPIO.as_ptr()) };
+
+    // Get port and pin number
+    let tx_port = tx.pin_port() / 16;
+    let tx_pin = tx.pin_port() % 16;
+
+    // Configure TX pin as push-pull output, initially high (idle)
+    tx.mode_w(pac::gpio::vals::PortMode::PUSHPULL);
+    tx.set_high();
+
+    // Configure GPIO routing based on EUSART instance
+    match T::index() {
+        0 => {
+            gpio.eusart0_txroute().write(|w| {
+                w.set_port(tx_port);
+                w.set_pin(tx_pin);
+            });
+            gpio.eusart0_routeen().modify(|w| w.set_txpen(true));
+
+            // Configure CTS if provided
+            if let Some(cts_pin) = cts {
+                let cts_port = cts_pin.pin_port() / 16;
+                let cts_pin_num = cts_pin.pin_port() % 16;
+
+                // CTS is an input
+                cts_pin.mode_w(pac::gpio::vals::PortMode::INPUT);
+
+                gpio.eusart0_ctsroute().write(|w| {
+                    w.set_port(cts_port);
+                    w.set_pin(cts_pin_num);
+                });
+                // Note: CTS doesn't need a pin enable - it's always enabled when CTSEN is set in CFG1
+            }
+        }
+        1 => {
+            gpio.eusart1_txroute().write(|w| {
+                w.set_port(tx_port);
+                w.set_pin(tx_pin);
+            });
+            gpio.eusart1_routeen().modify(|w| w.set_txpen(true));
+
+            if let Some(cts_pin) = cts {
+                let cts_port = cts_pin.pin_port() / 16;
+                let cts_pin_num = cts_pin.pin_port() % 16;
+
+                cts_pin.mode_w(pac::gpio::vals::PortMode::INPUT);
+
+                gpio.eusart1_ctsroute().write(|w| {
+                    w.set_port(cts_port);
+                    w.set_pin(cts_pin_num);
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Deconfigure pins when the EUSART is dropped.
+fn deconfigure_pins<T: Instance>() {
+    // SAFETY: GPIO peripheral is a singleton, and we're only configuring routes
+    let gpio = unsafe { pac::gpio::Gpio::from_ptr(GPIO.as_ptr()) };
+
+    match T::index() {
+        0 => {
+            // Disable all EUSART0 routes
+            gpio.eusart0_routeen().write(|w| {
+                w.set_rxpen(false);
+                w.set_txpen(false);
+                w.set_rtspen(false);
+            });
+        }
+        1 => {
+            gpio.eusart1_routeen().write(|w| {
+                w.set_rxpen(false);
+                w.set_txpen(false);
+                w.set_rtspen(false);
+            });
+        }
+        _ => {}
+    }
+}
+
+// ============================================================================
+// Instance trait and implementations
+// ============================================================================
+
+pub(crate) trait SealedInstance {
+    fn regs() -> pac::eusart::Eusart;
     fn state() -> &'static State;
-    fn buffered_state() -> &'static buffered::State;
+    /// Returns the EUSART instance index (0 for EUSART0, 1 for EUSART1, etc.)
+    fn index() -> u8;
 }
 
-/// USART peripheral instance trait.
+/// EUSART peripheral instance trait.
 #[allow(private_bounds)]
 pub trait Instance: SealedInstance + PeripheralType + 'static + Send {
-    /// Interrupt for this peripheral.
-    type Interrupt: interrupt::typelevel::Interrupt;
+    /// RX interrupt for this peripheral.
+    type RxInterrupt: interrupt::typelevel::Interrupt;
+    /// TX interrupt for this peripheral.
+    type TxInterrupt: interrupt::typelevel::Interrupt;
 }
 
-pin_trait!(RxPin, Instance);
-pin_trait!(TxPin, Instance);
-pin_trait!(CtsPin, Instance);
-pin_trait!(RtsPin, Instance);
-pin_trait!(CkPin, Instance);
-pin_trait!(DePin, Instance);
+// ============================================================================
+// embedded-io trait implementations
+// ============================================================================
 
-dma_trait!(TxDma, Instance);
-dma_trait!(RxDma, Instance);
-
-macro_rules! impl_usart {
-    ($inst:ident, $irq:ident, $kind:expr) => {
-        #[allow(private_interfaces)]
-        impl SealedInstance for crate::peripherals::$inst {
-            fn info() -> &'static Info {
-                static INFO: Info = Info {
-                    regs: unsafe { Regs::from_ptr(crate::pac::$inst.as_ptr()) },
-                    rcc: crate::peripherals::$inst::RCC_INFO,
-                    interrupt: crate::interrupt::typelevel::$irq::IRQ,
-                    kind: $kind,
-                };
-                &INFO
+impl embedded_io::Error for Error {
+    fn kind(&self) -> embedded_io::ErrorKind {
+        match self {
+            Error::Framing | Error::Parity => embedded_io::ErrorKind::InvalidData,
+            Error::Overflow | Error::Underflow | Error::TxOverflow => {
+                embedded_io::ErrorKind::OutOfMemory
             }
+        }
+    }
+}
 
-            fn state() -> &'static State {
-                static STATE: State = State::new();
+impl<'d, T: Instance> embedded_io::ErrorType for Eusart<'d, T> {
+    type Error = Error;
+}
+
+impl<'d, T: Instance> embedded_io::ErrorType for EusartTx<'d, T> {
+    type Error = Error;
+}
+
+impl<'d, T: Instance> embedded_io::ErrorType for EusartRx<'d, T> {
+    type Error = Error;
+}
+
+impl<'d, T: Instance> embedded_io::Write for Eusart<'d, T> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.blocking_write(buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.blocking_flush()
+    }
+}
+
+impl<'d, T: Instance> embedded_io::Write for EusartTx<'d, T> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.blocking_write(buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.blocking_flush()
+    }
+}
+
+impl<'d, T: Instance> embedded_io::Read for EusartRx<'d, T> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.blocking_read(buf)?;
+        Ok(buf.len())
+    }
+}
+
+impl<'d, T: Instance> embedded_io_async::Write for Eusart<'d, T> {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        Eusart::write(self, buf).await?;
+        Ok(buf.len())
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.tx.flush().await
+    }
+}
+
+impl<'d, T: Instance> embedded_io_async::Write for EusartTx<'d, T> {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        EusartTx::write(self, buf).await?;
+        Ok(buf.len())
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        EusartTx::flush(self).await
+    }
+}
+
+impl<'d, T: Instance> embedded_io_async::Read for EusartRx<'d, T> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        EusartRx::read(self, buf).await?;
+        Ok(buf.len())
+    }
+}
+
+// ============================================================================
+// Macro for implementing Instance trait
+// ============================================================================
+
+/// Macro to implement the Instance trait for EUSART peripherals.
+#[macro_export]
+macro_rules! impl_eusart {
+    ($type:ident, $pac_type:ident, $rx_irq:ident, $tx_irq:ident, $index:expr) => {
+        impl crate::usart::eusart::SealedInstance for crate::peripherals::$type {
+            fn regs() -> crate::pac::eusart::Eusart {
+                crate::pac::$pac_type
+            }
+            fn state() -> &'static crate::usart::eusart::State {
+                static STATE: crate::usart::eusart::State = crate::usart::eusart::State::new();
                 &STATE
             }
-
-            fn buffered_state() -> &'static buffered::State {
-                static BUFFERED_STATE: buffered::State = buffered::State::new();
-                &BUFFERED_STATE
+            fn index() -> u8 {
+                $index
             }
         }
-
-        impl Instance for crate::peripherals::$inst {
-            type Interrupt = crate::interrupt::typelevel::$irq;
+        impl crate::usart::eusart::Instance for crate::peripherals::$type {
+            type RxInterrupt = crate::interrupt::typelevel::$rx_irq;
+            type TxInterrupt = crate::interrupt::typelevel::$tx_irq;
         }
     };
 }
-
-foreach_interrupt!(
-    ($inst:ident, usart, LPUART, $signal_name:ident, $irq:ident) => {
-        impl_usart!($inst, $irq, Kind::Lpuart);
-    };
-    ($inst:ident, usart, $block:ident, $signal_name:ident, $irq:ident) => {
-        impl_usart!($inst, $irq, Kind::Uart);
-    };
-);

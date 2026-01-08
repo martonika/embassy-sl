@@ -55,5 +55,8 @@ embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy.git", 
 #embassy-usb-driver = { git = "https://github.com/embassy-rs/embassy.git" }
 
 embedded-hal = "1.0.0"
+embedded-io = "0.6.1"
 silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = ["rt"] }
 futures-util = { version = "0.3.31", default-features = false }
+bitflags = "2.9.1"
+embedded-io-async = "0.6.1"
