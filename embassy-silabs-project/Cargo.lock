@@ -272,8 +272,10 @@ dependencies = [
  "embassy-time-queue-utils",
  "embedded-graphics-core",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "embedded-io",
  "embedded-io-async",
+ "embedded-storage",
  "futures-util",
  "silabs-pac",
 ]

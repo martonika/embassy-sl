@@ -778,6 +778,7 @@ impl<'d, T: Instance> MemLcd<'d, T> {
     /// * `extcomin` - COM inversion signal pin (DISP_EXTCOMIN)
     /// * `spi_config` - SPI configuration
     /// * `config` - MemLcd configuration
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         eusart: Peri<'d, T>,
         sclk: Peri<'d, impl GpioPin>,

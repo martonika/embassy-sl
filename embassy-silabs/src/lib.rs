@@ -3,11 +3,19 @@
 mod macros;
 mod time_driver;
 
+pub mod cmu;
 pub mod drivers;
+pub mod emu;
+pub mod flash;
 pub mod gpio;
-//pub mod timer_32b;
+pub mod i2c;
+pub mod iadc;
+pub mod ldma;
+pub mod spi;
 pub mod time;
+pub mod timer;
 pub mod usart;
+pub mod wdog;
 
 // This mod MUST go last, so that it sees all the `impl_foo!` macros
 #[cfg_attr(feature = "_xg24", path = "chips/efr32xg24.rs")]
@@ -37,12 +45,21 @@ pub fn init() -> Peripherals {
         w.set_gpio(true);
         w.set_sysrtc0(true);
         w.set_lfrco(true);
+        w.set_ulfrco(true);
         w.set_usart0(true);
+        w.set_i2c0(true);
+        w.set_i2c1(true);
+        w.set_iadc0(true);
+        w.set_wdog0(true);
+        w.set_ldma(true);
+        w.set_ldmaxbar(true);
     });
-    // EUSART clocks are in CLKEN1
+    // EUSART and WDOG1 clocks are in CLKEN1
     pac::CMU.clken1().modify(|w| {
         w.set_eusart0(true);
         w.set_eusart1(true);
+        w.set_wdog1(true);
+        w.set_msc(true);
     });
 
     time_driver::init(crate::interrupt::Priority::P0);

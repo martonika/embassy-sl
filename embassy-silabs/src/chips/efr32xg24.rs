@@ -1,8 +1,13 @@
 #![allow(clippy::missing_safety_doc)]
 
 use crate::impl_eusart;
+use crate::impl_i2c;
+use crate::impl_iadc;
 use crate::impl_memlcd_spi;
+use crate::impl_spi;
+use crate::impl_timer;
 use crate::impl_usart;
+use crate::impl_wdog;
 
 pub mod pac {
     pub use silabs_pac::*;
@@ -12,9 +17,10 @@ pub mod pac {
     #[doc(no_inline)]
     pub use silabs_pac::{
         CMU_NS as CMU, EUSART0_NS as EUSART0, EUSART1_NS as EUSART1, GPIO_NS as GPIO,
-        LETIMER0_NS as LETIMER0, LFRCO_NS as LFRCO, SYSRTC0_NS as SYSRTC, TIMER0_NS as TIMER0,
-        TIMER1_NS as TIMER1, TIMER2_NS as TIMER2, TIMER3_NS as TIMER3, TIMER4_NS as TIMER4,
-        USART0_NS as USART0,
+        I2C0_NS as I2C0, I2C1_NS as I2C1, IADC0_NS as IADC0, LETIMER0_NS as LETIMER0,
+        LFRCO_NS as LFRCO, SYSRTC0_NS as SYSRTC, TIMER0_NS as TIMER0, TIMER1_NS as TIMER1,
+        TIMER2_NS as TIMER2, TIMER3_NS as TIMER3, TIMER4_NS as TIMER4, USART0_NS as USART0,
+        WDOG0_NS as WDOG0, WDOG1_NS as WDOG1,
     };
 
     // secure
@@ -22,9 +28,10 @@ pub mod pac {
     #[doc(no_inline)]
     pub use silabs_pac::{
         CMU_S as CMU, EUSART0_S as EUSART0, EUSART1_S as EUSART1, GPIO_S as GPIO,
-        LETIMER0_S as LETIMER0, LFRCO_S as LFRCO, SYSRTC0_S as SYSRTC, TIMER0_S as TIMER0,
-        TIMER1_S as TIMER1, TIMER2_S as TIMER2, TIMER3_S as TIMER3, TIMER4_S as TIMER4,
-        USART0_S as USART0,
+        I2C0_S as I2C0, I2C1_S as I2C1, IADC0_S as IADC0, LETIMER0_S as LETIMER0,
+        LFRCO_S as LFRCO, SYSRTC0_S as SYSRTC, TIMER0_S as TIMER0, TIMER1_S as TIMER1,
+        TIMER2_S as TIMER2, TIMER3_S as TIMER3, TIMER4_S as TIMER4, USART0_S as USART0,
+        WDOG0_S as WDOG0, WDOG1_S as WDOG1,
     };
 }
 
@@ -44,6 +51,14 @@ embassy_hal_internal::peripherals! {
     // EUSART peripherals
     EUSART0,
     EUSART1,
+    // I2C peripherals
+    I2C0,
+    I2C1,
+    // IADC peripheral
+    IADC0,
+    // Watchdog peripherals
+    WDOG0,
+    WDOG1,
 
     // GPIO Port A
     PA_00,
@@ -157,6 +172,9 @@ embassy_hal_internal::interrupt_mod!(
     USART0_RX, USART0_TX, // USART0
     EUSART0_RX, EUSART0_TX, // EUSART0
     EUSART1_RX, EUSART1_TX, // EUSART1
+    I2C0, I2C1, // I2C
+    IADC,       // IADC
+    WDOG0, WDOG1, // Watchdog
 );
 
 // USART peripheral implementation
@@ -169,3 +187,25 @@ impl_eusart!(EUSART1, EUSART1, EUSART1_RX, EUSART1_TX, 1);
 // EUSART peripheral implementations (SPI mode for memory LCD)
 impl_memlcd_spi!(EUSART0, EUSART0, 0);
 impl_memlcd_spi!(EUSART1, EUSART1, 1);
+
+// I2C peripheral implementations
+impl_i2c!(I2C0, I2C0, I2C0, 0);
+impl_i2c!(I2C1, I2C1, I2C1, 1);
+
+// SPI peripheral implementations (using EUSART)
+impl_spi!(EUSART0, EUSART0, 0);
+impl_spi!(EUSART1, EUSART1, 1);
+
+// Timer peripheral implementations
+impl_timer!(TIMER0, TIMER0, 0);
+impl_timer!(TIMER1, TIMER1, 1);
+impl_timer!(TIMER2, TIMER2, 2);
+impl_timer!(TIMER3, TIMER3, 3);
+impl_timer!(TIMER4, TIMER4, 4);
+
+// IADC peripheral implementation
+impl_iadc!(IADC0, IADC0, IADC);
+
+// Watchdog peripheral implementations
+impl_wdog!(WDOG0, WDOG0, 0);
+impl_wdog!(WDOG1, WDOG1, 1);
