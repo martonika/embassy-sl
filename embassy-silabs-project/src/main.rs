@@ -4,7 +4,7 @@
 use embassy_executor::Spawner;
 
 use defmt::*;
-use embassy_silabs::display::memlcd::{Config as SpiConfig, MemLcdSpi};
+use embassy_silabs::drivers::display::memlcd::{Config as SpiConfig, MemLcdSpi};
 use embassy_silabs::gpio::*;
 use embassy_time::{Duration, Ticker, Timer};
 use {defmt_rtt as _, panic_probe as _}; // global logger
@@ -23,13 +23,13 @@ const SCS_SETUP_US: u64 = 6;
 const SCS_HOLD_US: u64 = 2;
 
 /// Memory LCD display driver
-struct MemLcd<'d, T: embassy_silabs::display::memlcd::Instance> {
+struct MemLcd<'d, T: embassy_silabs::drivers::display::memlcd::Instance> {
     spi: MemLcdSpi<'d, T>,
     cs: Output<'d>,
     enable: Output<'d>,
 }
 
-impl<'d, T: embassy_silabs::display::memlcd::Instance> MemLcd<'d, T> {
+impl<'d, T: embassy_silabs::drivers::display::memlcd::Instance> MemLcd<'d, T> {
     /// Power on the display by setting DISP_ENABLE high
     pub fn power_on(&mut self) {
         self.enable.set_high();
