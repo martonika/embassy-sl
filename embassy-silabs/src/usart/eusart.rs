@@ -859,21 +859,21 @@ impl<'d, T: Instance> embedded_io_async::Read for EusartRx<'d, T> {
 #[macro_export]
 macro_rules! impl_eusart {
     ($type:ident, $pac_type:ident, $rx_irq:ident, $tx_irq:ident, $index:expr) => {
-        impl crate::usart::eusart::SealedInstance for crate::peripherals::$type {
-            fn regs() -> crate::pac::eusart::Eusart {
-                crate::pac::$pac_type
+        impl $crate::usart::eusart::SealedInstance for $crate::peripherals::$type {
+            fn regs() -> $crate::pac::eusart::Eusart {
+                $crate::pac::$pac_type
             }
-            fn state() -> &'static crate::usart::eusart::State {
-                static STATE: crate::usart::eusart::State = crate::usart::eusart::State::new();
+            fn state() -> &'static $crate::usart::eusart::State {
+                static STATE: $crate::usart::eusart::State = $crate::usart::eusart::State::new();
                 &STATE
             }
             fn index() -> u8 {
                 $index
             }
         }
-        impl crate::usart::eusart::Instance for crate::peripherals::$type {
-            type RxInterrupt = crate::interrupt::typelevel::$rx_irq;
-            type TxInterrupt = crate::interrupt::typelevel::$tx_irq;
+        impl $crate::usart::eusart::Instance for $crate::peripherals::$type {
+            type RxInterrupt = $crate::interrupt::typelevel::$rx_irq;
+            type TxInterrupt = $crate::interrupt::typelevel::$tx_irq;
         }
     };
 }

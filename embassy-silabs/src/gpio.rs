@@ -305,6 +305,7 @@ pub(crate) trait SealedPin {
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn ctrl(&self) -> Reg<regs::Ctrl, RW> {
         self.port().ctrl()
     }
@@ -329,6 +330,7 @@ pub(crate) trait SealedPin {
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn mode_r(&self) -> vals::PortMode {
         // For pins 0-7, use MODEL with mode0-mode7
         // For pins 8-15, use MODEH with mode0-mode7 (offset by 8)

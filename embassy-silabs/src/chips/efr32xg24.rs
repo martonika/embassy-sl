@@ -1,5 +1,8 @@
+#![allow(clippy::missing_safety_doc)]
+
 use crate::impl_eusart;
 use crate::impl_memlcd_spi;
+use crate::impl_usart;
 
 pub mod pac {
     pub use silabs_pac::*;
@@ -36,6 +39,8 @@ embassy_hal_internal::peripherals! {
     TIMER2,
     TIMER3,
     TIMER4,
+    // USART peripheral
+    USART0,
     // EUSART peripherals
     EUSART0,
     EUSART1,
@@ -153,6 +158,9 @@ embassy_hal_internal::interrupt_mod!(
     EUSART0_RX, EUSART0_TX, // EUSART0
     EUSART1_RX, EUSART1_TX, // EUSART1
 );
+
+// USART peripheral implementation
+impl_usart!(USART0, USART0, USART0_RX, USART0_TX, 0);
 
 // EUSART peripheral implementations (UART mode)
 impl_eusart!(EUSART0, EUSART0, EUSART0_RX, EUSART0_TX, 0);

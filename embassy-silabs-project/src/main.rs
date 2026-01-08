@@ -29,7 +29,7 @@ struct MemLcd<'d, T: embassy_silabs::drivers::display::memlcd::Instance> {
     enable: Output<'d>,
 }
 
-impl<'d, T: embassy_silabs::drivers::display::memlcd::Instance> MemLcd<'d, T> {
+impl<T: embassy_silabs::drivers::display::memlcd::Instance> MemLcd<'_, T> {
     /// Power on the display by setting DISP_ENABLE high
     pub fn power_on(&mut self) {
         self.enable.set_high();
