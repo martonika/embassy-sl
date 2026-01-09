@@ -209,7 +209,6 @@ async fn sensor_task(mut sensor: Si7021<I2c<'static, peripherals::I2C1>>) {
     Timer::after_millis(100).await;
 
     loop {
-        // Use the Si7021 driver to measure both humidity and temperature
         match sensor.measure().await {
             Ok(measurement) => {
                 HUMIDITY_CENTI_PERCENT.store(measurement.humidity_centi_percent, Ordering::Relaxed);
@@ -229,7 +228,7 @@ async fn sensor_task(mut sensor: Si7021<I2c<'static, peripherals::I2C1>>) {
             }
         }
 
-        // Read sensor every 2 seconds
+        // Read sensor every second
         Timer::after_millis(1000).await;
     }
 }
