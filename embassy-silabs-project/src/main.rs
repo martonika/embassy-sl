@@ -108,7 +108,7 @@ where
     let current_pos = frame % num_positions;
 
     for i in 0..num_positions {
-        let angle = (i as f32) * 2.0 * 3.14159 / (num_positions as f32);
+        let angle = (i as f32) * 2.0 * core::f32::consts::PI / (num_positions as f32);
         let cos_a = libm::cosf(angle);
         let sin_a = libm::sinf(angle);
 

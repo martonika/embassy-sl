@@ -957,15 +957,11 @@ impl<'d, T: Instance> embedded_hal::i2c::I2c for I2c<'d, T> {
     ) -> Result<(), Self::Error> {
         // Handle common cases efficiently
         match operations {
-            [] => return Ok(()),
-            [embedded_hal::i2c::Operation::Write(data)] => {
-                return self.blocking_write(address, data);
-            }
-            [embedded_hal::i2c::Operation::Read(buffer)] => {
-                return self.blocking_read(address, buffer);
-            }
+            [] => Ok(()),
+            [embedded_hal::i2c::Operation::Write(data)] => self.blocking_write(address, data),
+            [embedded_hal::i2c::Operation::Read(buffer)] => self.blocking_read(address, buffer),
             [embedded_hal::i2c::Operation::Write(write), embedded_hal::i2c::Operation::Read(read)] => {
-                return self.blocking_write_read(address, write, read);
+                self.blocking_write_read(address, write, read)
             }
             _ => {
                 // For complex multi-operation transactions, fall back to individual ops
@@ -993,15 +989,11 @@ impl<'d, T: Instance> embedded_hal_async::i2c::I2c for I2c<'d, T> {
     ) -> Result<(), Self::Error> {
         // Handle common cases efficiently
         match operations {
-            [] => return Ok(()),
-            [embedded_hal::i2c::Operation::Write(data)] => {
-                return self.write(address, data).await;
-            }
-            [embedded_hal::i2c::Operation::Read(buffer)] => {
-                return self.read(address, buffer).await;
-            }
+            [] => Ok(()),
+            [embedded_hal::i2c::Operation::Write(data)] => self.write(address, data).await,
+            [embedded_hal::i2c::Operation::Read(buffer)] => self.read(address, buffer).await,
             [embedded_hal::i2c::Operation::Write(write), embedded_hal::i2c::Operation::Read(read)] => {
-                return self.write_read(address, write, read).await;
+                self.write_read(address, write, read).await
             }
             _ => {
                 // For complex multi-operation transactions, fall back to individual ops
