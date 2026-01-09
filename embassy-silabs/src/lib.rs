@@ -12,7 +12,6 @@ pub mod i2c;
 pub mod iadc;
 pub mod ldma;
 pub mod spi;
-pub mod time;
 pub mod timer;
 pub mod usart;
 pub mod wdog;
