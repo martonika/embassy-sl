@@ -3,13 +3,22 @@
 
 use embassy_executor::Spawner;
 
+use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use defmt::*;
 use embassy_silabs::drivers::display::memlcd::{
     extcomin_task_owned, MemLcd, MemLcdConfig, SpiConfig,
 };
+use embassy_silabs::drivers::sensor::Si7021;
 use embassy_silabs::gpio::*;
+use embassy_silabs::i2c::{self, I2c};
+use embassy_silabs::{bind_interrupts, peripherals};
 use embassy_time::Timer;
+use heapless::String;
 use {defmt_rtt as _, panic_probe as _}; // global logger
+
+// Simple monotonic counter for defmt timestamps (safe before time driver init)
+static LOG_COUNT: AtomicU32 = AtomicU32::new(0);
+defmt::timestamp!("{=u32}", LOG_COUNT.fetch_add(1, Ordering::Relaxed));
 
 // embedded-graphics imports
 use embedded_graphics::{
@@ -25,7 +34,18 @@ use embedded_graphics::{
 // SPI frequency for memory LCD (1.1 MHz max)
 const SPI_FREQ: u32 = 1_100_000;
 
-/// Draw the static text on the display
+// Bind I2C1 interrupt to the I2C interrupt handler
+bind_interrupts!(struct Irqs {
+    I2C1 => i2c::InterruptHandler<peripherals::I2C1>;
+});
+
+// Shared sensor readings (temperature in centi-degrees, humidity in centi-percent)
+// Using AtomicI32 for lock-free access between tasks
+static TEMPERATURE_CENTI_C: AtomicI32 = AtomicI32::new(0);
+static HUMIDITY_CENTI_PERCENT: AtomicI32 = AtomicI32::new(0);
+static SENSOR_VALID: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Draw the static text and sensor readings on the display
 fn draw_text<D>(display: &mut D) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
@@ -33,11 +53,39 @@ where
     let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
     let text_style = TextStyleBuilder::new().alignment(Alignment::Center).build();
 
-    // "embassy-silabs" centered
-    Text::with_text_style("embassy-silabs", Point::new(64, 50), style, text_style).draw(display)?;
+    // "embassy-silabs" centered at top
+    Text::with_text_style("embassy-silabs", Point::new(64, 20), style, text_style).draw(display)?;
 
     // "hello from Rust" centered below
-    Text::with_text_style("hello from Rust", Point::new(64, 65), style, text_style).draw(display)?;
+    Text::with_text_style("hello from Rust", Point::new(64, 35), style, text_style).draw(display)?;
+
+    // Display sensor readings if available
+    let sensor_valid = SENSOR_VALID.load(Ordering::Relaxed);
+    if sensor_valid {
+        let temp_centi = TEMPERATURE_CENTI_C.load(Ordering::Relaxed);
+        let humidity_centi = HUMIDITY_CENTI_PERCENT.load(Ordering::Relaxed);
+
+        // Format temperature (e.g., "Temp: 25.3 C")
+        let temp_whole = temp_centi / 100;
+        let temp_frac = (temp_centi % 100).abs() / 10;
+        let mut temp_str: String<20> = String::new();
+        if temp_centi < 0 && temp_whole == 0 {
+            core::fmt::write(&mut temp_str, format_args!("Temp: -{}.{} C", temp_whole.abs(), temp_frac)).ok();
+        } else {
+            core::fmt::write(&mut temp_str, format_args!("Temp: {}.{} C", temp_whole, temp_frac)).ok();
+        }
+        Text::with_text_style(&temp_str, Point::new(64, 55), style, text_style).draw(display)?;
+
+        // Format humidity (e.g., "RH: 45.2 %")
+        let rh_whole = humidity_centi / 100;
+        let rh_frac = (humidity_centi % 100) / 10;
+        let mut rh_str: String<20> = String::new();
+        core::fmt::write(&mut rh_str, format_args!("RH: {}.{} %", rh_whole, rh_frac)).ok();
+        Text::with_text_style(&rh_str, Point::new(64, 70), style, text_style).draw(display)?;
+    } else {
+        // Sensor not yet ready
+        Text::with_text_style("Sensor: --", Point::new(64, 55), style, text_style).draw(display)?;
+    }
 
     Ok(())
 }
@@ -47,7 +95,7 @@ fn draw_spinner<D>(display: &mut D, frame: u32) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    let center = Point::new(64, 95);
+    let center = Point::new(64, 110);
     let radius = 10i32;
 
     // Draw outer circle
@@ -119,9 +167,27 @@ async fn main(spawner: Spawner) {
     // Create EXTCOMIN pin for the background task
     let disp_extcomin = Output::new(p.PC_06, Level::Low);
 
+    // Enable the RHT sensor (Si7021) - requires PD_03 HIGH per board config
+    let _sensor_enable = Output::new(p.PD_03, Level::High);
+
+    // Configure I2C1 for the Si7021 sensor
+    // SCL: PC_05, SDA: PC_07 (from board config)
+    let i2c_config = i2c::Config::default();
+    let i2c = I2c::new(
+        p.I2C1,
+        p.PC_05, // SCL
+        p.PC_07, // SDA
+        Irqs,
+        i2c_config,
+    );
+
+    // Create the Si7021 sensor driver
+    let sensor = Si7021::new(i2c);
+
     // Spawn tasks
     unwrap!(spawner.spawn(blink_led(led0)));
     unwrap!(spawner.spawn(extcomin_task_owned(disp_extcomin, 60)));
+    unwrap!(spawner.spawn(sensor_task(sensor)));
     unwrap!(spawner.spawn(display_task(display)));
 }
 
@@ -131,6 +197,40 @@ async fn blink_led(mut led: Output<'static>) {
     loop {
         led.toggle();
         Timer::after_millis(500).await;
+    }
+}
+
+/// Sensor task: periodically read temperature and humidity from Si7021
+#[embassy_executor::task]
+async fn sensor_task(mut sensor: Si7021<I2c<'static, peripherals::I2C1>>) {
+    info!("Starting sensor task");
+
+    // Give the sensor some time to initialize after power-on
+    Timer::after_millis(100).await;
+
+    loop {
+        // Use the Si7021 driver to measure both humidity and temperature
+        match sensor.measure().await {
+            Ok(measurement) => {
+                HUMIDITY_CENTI_PERCENT.store(measurement.humidity_centi_percent, Ordering::Relaxed);
+                TEMPERATURE_CENTI_C.store(measurement.temperature_centi_c, Ordering::Relaxed);
+                SENSOR_VALID.store(true, Ordering::Relaxed);
+
+                info!(
+                    "Humidity: {}.{}%, Temperature: {}.{} C",
+                    measurement.humidity_centi_percent / 100,
+                    (measurement.humidity_centi_percent % 100) / 10,
+                    measurement.temperature_centi_c / 100,
+                    (measurement.temperature_centi_c % 100).abs() / 10
+                );
+            }
+            Err(e) => {
+                warn!("Failed to read sensor: {:?}", e);
+            }
+        }
+
+        // Read sensor every 2 seconds
+        Timer::after_millis(1000).await;
     }
 }
 

@@ -475,12 +475,26 @@ impl<'d, T: Instance> I2c<'d, T> {
         let r = T::regs();
         let s = T::state();
 
-        // Abort any pending operation if bus is busy
-        if r.state().read().busy() {
-            r.cmd().write(|w| w.set_abort(true));
+        // Disable all interrupts first
+        r.ien().write(|w| w.0 = 0);
+
+        // If bus is busy or in a bad state, perform a full reset
+        let state = r.state().read();
+        if state.busy() || state.nacked() {
+            // Abort and send STOP to release the bus
+            r.cmd().write(|w| {
+                w.set_abort(true);
+                w.set_stop(true);
+            });
+            
+            // Wait for bus to become idle (with timeout)
+            let mut timeout = 10000u32;
+            while r.state().read().busy() && timeout > 0 {
+                timeout -= 1;
+            }
         }
 
-        // Clear pending interrupts and TX buffer
+        // Clear pending interrupts and TX/RX buffers
         r.cmd().write(|w| {
             w.set_clearpc(true);
             w.set_cleartx(true);
@@ -608,6 +622,8 @@ impl<'d, T: Instance> I2c<'d, T> {
             s.waker.register(cx.waker());
 
             let if_flags = r.if_().read();
+            let state = r.state().read();
+            
             if if_flags.buserr() {
                 clear_interrupts(r);
                 return Poll::Ready(Err(Error::Bus));
@@ -616,9 +632,14 @@ impl<'d, T: Instance> I2c<'d, T> {
                 clear_interrupts(r);
                 return Poll::Ready(Err(Error::ArbitrationLoss));
             }
-            if if_flags.nack() {
-                clear_interrupts(r);
+            if if_flags.nack() || state.nacked() {
+                // Send STOP and wait for bus to be released
                 r.cmd().write(|w| w.set_stop(true));
+                let mut timeout = 10000u32;
+                while r.state().read().busy() && timeout > 0 {
+                    timeout -= 1;
+                }
+                clear_interrupts(r);
                 return Poll::Ready(Err(Error::Nack));
             }
             if if_flags.ack() {
@@ -648,6 +669,8 @@ impl<'d, T: Instance> I2c<'d, T> {
             s.waker.register(cx.waker());
 
             let if_flags = r.if_().read();
+            let state = r.state().read();
+            
             if if_flags.buserr() {
                 clear_interrupts(r);
                 return Poll::Ready(Err(Error::Bus));
@@ -656,7 +679,25 @@ impl<'d, T: Instance> I2c<'d, T> {
                 clear_interrupts(r);
                 return Poll::Ready(Err(Error::ArbitrationLoss));
             }
-            if r.status().read().rxdatav() {
+            // Check for NACK condition - transaction has failed
+            if state.nacked() {
+                // Send STOP and wait for bus to be released
+                r.cmd().write(|w| w.set_stop(true));
+                let mut timeout = 10000u32;
+                while r.state().read().busy() && timeout > 0 {
+                    timeout -= 1;
+                }
+                clear_interrupts(r);
+                return Poll::Ready(Err(Error::Nack));
+            }
+            // Check if bus is no longer busy and master - transaction aborted
+            if !state.busy() && !state.master() {
+                clear_interrupts(r);
+                return Poll::Ready(Err(Error::Bus));
+            }
+            
+            let status = r.status().read();
+            if status.rxdatav() {
                 return Poll::Ready(Ok(()));
             }
 
@@ -747,13 +788,30 @@ fn flush_rx(r: pac::i2c0::I2c0) {
     while r.status().read().rxdatav() {
         let _ = r.rxdata().read();
     }
-    // Clear RXDATAV flag (required on Series 2)
-    r.if_().write(|w| w.set_rxdatav(true));
+    // Clear RXDATAV flag using IF_CLR
+    clear_interrupt_flags(r, 1 << 5); // RXDATAV is bit 5
+}
+
+/// Clear specified interrupt flags using the IF_CLR register.
+/// On EFR32 Series 2, the CLR register is at base + 0x2000 + offset.
+fn clear_interrupt_flags(r: pac::i2c0::I2c0, flags: u32) {
+    // IF register is at offset 60 (0x3C) from the I2C base
+    // IF_CLR is at base + 0x2000 + 0x3C
+    const IF_OFFSET: usize = 60;
+    const CLR_OFFSET: usize = 0x2000;
+    
+    let base = r.as_ptr() as usize;
+    let if_clr_addr = (base + CLR_OFFSET + IF_OFFSET) as *mut u32;
+    
+    // Safety: We're writing to a valid peripheral register
+    unsafe {
+        core::ptr::write_volatile(if_clr_addr, flags);
+    }
 }
 
 /// Clear all interrupt flags.
 fn clear_interrupts(r: pac::i2c0::I2c0) {
-    r.if_().write(|w| w.0 = 0xFFFF_FFFF);
+    clear_interrupt_flags(r, 0xFFFF_FFFF);
 }
 
 /// Set the I2C bus frequency.
@@ -897,17 +955,33 @@ impl<'d, T: Instance> embedded_hal::i2c::I2c for I2c<'d, T> {
         address: u8,
         operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), Self::Error> {
-        for op in operations {
-            match op {
-                embedded_hal::i2c::Operation::Read(buffer) => {
-                    self.blocking_read(address, buffer)?;
+        // Handle common cases efficiently
+        match operations {
+            [] => return Ok(()),
+            [embedded_hal::i2c::Operation::Write(data)] => {
+                return self.blocking_write(address, data);
+            }
+            [embedded_hal::i2c::Operation::Read(buffer)] => {
+                return self.blocking_read(address, buffer);
+            }
+            [embedded_hal::i2c::Operation::Write(write), embedded_hal::i2c::Operation::Read(read)] => {
+                return self.blocking_write_read(address, write, read);
+            }
+            _ => {
+                // For complex multi-operation transactions, fall back to individual ops
+                for op in operations {
+                    match op {
+                        embedded_hal::i2c::Operation::Read(buffer) => {
+                            self.blocking_read(address, buffer)?;
+                        }
+                        embedded_hal::i2c::Operation::Write(data) => {
+                            self.blocking_write(address, data)?;
+                        }
+                    }
                 }
-                embedded_hal::i2c::Operation::Write(data) => {
-                    self.blocking_write(address, data)?;
-                }
+                Ok(())
             }
         }
-        Ok(())
     }
 }
 
@@ -917,17 +991,34 @@ impl<'d, T: Instance> embedded_hal_async::i2c::I2c for I2c<'d, T> {
         address: u8,
         operations: &mut [embedded_hal::i2c::Operation<'_>],
     ) -> Result<(), Self::Error> {
-        for op in operations {
-            match op {
-                embedded_hal::i2c::Operation::Read(buffer) => {
-                    self.read(address, buffer).await?;
+        // Handle common cases efficiently
+        match operations {
+            [] => return Ok(()),
+            [embedded_hal::i2c::Operation::Write(data)] => {
+                return self.write(address, data).await;
+            }
+            [embedded_hal::i2c::Operation::Read(buffer)] => {
+                return self.read(address, buffer).await;
+            }
+            [embedded_hal::i2c::Operation::Write(write), embedded_hal::i2c::Operation::Read(read)] => {
+                return self.write_read(address, write, read).await;
+            }
+            _ => {
+                // For complex multi-operation transactions, fall back to individual ops
+                // Note: This is not ideal as it sends STOP between operations
+                for op in operations {
+                    match op {
+                        embedded_hal::i2c::Operation::Read(buffer) => {
+                            self.read(address, buffer).await?;
+                        }
+                        embedded_hal::i2c::Operation::Write(data) => {
+                            self.write(address, data).await?;
+                        }
+                    }
                 }
-                embedded_hal::i2c::Operation::Write(data) => {
-                    self.write(address, data).await?;
-                }
+                Ok(())
             }
         }
-        Ok(())
     }
 }
 

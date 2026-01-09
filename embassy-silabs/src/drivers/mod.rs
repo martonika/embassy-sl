@@ -4,4 +4,5 @@
 //! such as displays, sensors, and other hardware components.
 
 pub mod display;
+pub mod sensor;
 
