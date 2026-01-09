@@ -21,6 +21,7 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features
 ] }
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", features = [
     "defmt",
+    "defmt-timestamp-uptime",
 ] }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = [

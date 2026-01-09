@@ -17,8 +17,8 @@ use heapless::String;
 use {defmt_rtt as _, panic_probe as _}; // global logger
 
 // Simple monotonic counter for defmt timestamps (safe before time driver init)
-static LOG_COUNT: AtomicU32 = AtomicU32::new(0);
-defmt::timestamp!("{=u32}", LOG_COUNT.fetch_add(1, Ordering::Relaxed));
+//static LOG_COUNT: AtomicU32 = AtomicU32::new(0);
+//defmt::timestamp!("{=u32}", LOG_COUNT.fetch_add(1, Ordering::Relaxed));
 
 // embedded-graphics imports
 use embedded_graphics::{
@@ -138,8 +138,10 @@ where
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("Initialize peripherals");
+    // Do NOT try to log before peripheral initialization!
+    // Will hard fault due to timer not started yet.
     let p = embassy_silabs::init();
+    info!("Initialized peripherals");
 
     // LED outputs for status indication
     let led0 = Output::new(p.PB_02, Level::Low); // BRD4187C + WPK
