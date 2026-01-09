@@ -32,6 +32,9 @@ silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = [
 embassy-silabs = { version = "0.1.0", path = "../embassy-silabs", features = [
     "defmt",
 ] }
+embassy-silabs-boards = { version = "0.1.0", path = "../embassy-silabs-boards", features = [
+    "brd4186c",
+] }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git" }
 static_cell = "2.1.0"
 embedded-graphics = "0.8"

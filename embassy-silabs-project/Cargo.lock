@@ -281,6 +281,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "embassy-silabs-boards"
+version = "0.1.0"
+dependencies = [
+ "embassy-silabs",
+]
+
+[[package]]
 name = "embassy-silabs-project"
 version = "0.1.0"
 dependencies = [
@@ -290,6 +297,7 @@ dependencies = [
  "defmt-rtt",
  "embassy-executor",
  "embassy-silabs",
+ "embassy-silabs-boards",
  "embassy-sync",
  "embassy-time",
  "embedded-graphics",

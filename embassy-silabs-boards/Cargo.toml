@@ -1,0 +1,19 @@
+[package]
+name = "embassy-silabs-boards"
+version = "0.1.0"
+edition = "2024"
+description = "Board Support Package (BSP) for Silabs development boards with Embassy"
+
+[features]
+default = []
+
+# Board features - each enables the appropriate chip family
+brd4186c = ["embassy-silabs/xg24"]  # xG24 Dev Kit (EFR32MG24)
+brd2601b = ["embassy-silabs/xg24"]  # Thunderboard Sense 2 (EFR32MG24)
+# brd4180a = ["embassy-silabs/xg21"]  # future xG21 board
+
+# Enable defmt logging
+defmt = ["embassy-silabs/defmt"]
+
+[dependencies]
+embassy-silabs = { version = "0.1.0", path = "../embassy-silabs" }

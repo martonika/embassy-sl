@@ -3,7 +3,7 @@
 
 use embassy_executor::Spawner;
 
-use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicI32, Ordering};
 use defmt::*;
 use embassy_silabs::drivers::display::memlcd::{
     extcomin_task_owned, MemLcd, MemLcdConfig, SpiConfig,
@@ -12,6 +12,7 @@ use embassy_silabs::drivers::sensor::Si7021;
 use embassy_silabs::gpio::*;
 use embassy_silabs::i2c::{self, I2c};
 use embassy_silabs::{bind_interrupts, peripherals};
+use embassy_silabs_boards::brd4186c::Board;
 use embassy_time::Timer;
 use heapless::String;
 use {defmt_rtt as _, panic_probe as _}; // global logger
@@ -143,8 +144,11 @@ async fn main(spawner: Spawner) {
     let p = embassy_silabs::init();
     info!("Initialized peripherals");
 
+    // Get board-specific pin assignments for BRD4186C (xG24 Dev Kit)
+    let (board, remaining) = Board::new(p);
+
     // LED outputs for status indication
-    let led0 = Output::new(p.PB_02, Level::Low); // BRD4187C + WPK
+    let led0 = Output::new(board.led0, Level::Low);
 
     // Configure SPI for memory LCD
     let mut spi_config = SpiConfig::default();
@@ -155,30 +159,29 @@ async fn main(spawner: Spawner) {
     // Configure MemLcd with auto EXTCOMIN toggling enabled
     let lcd_config = MemLcdConfig::default();
 
-    // Create the display driver using the HAL MemLcd
+    // Create the display driver using board pin assignments
     let display = MemLcd::new_without_extcomin(
-        p.EUSART1,
-        p.PC_03, // SCLK
-        p.PC_01, // MOSI
-        p.PC_08, // CS
-        p.PC_09, // ENABLE
+        remaining.eusart1,
+        board.display_clk,
+        board.display_mosi,
+        board.display_cs,
+        board.display_enable,
         spi_config,
         lcd_config,
     );
 
     // Create EXTCOMIN pin for the background task
-    let disp_extcomin = Output::new(p.PC_06, Level::Low);
+    let disp_extcomin = Output::new(board.display_extcomin, Level::Low);
 
-    // Enable the RHT sensor (Si7021) - requires PD_03 HIGH per board config
-    let _sensor_enable = Output::new(p.PD_03, Level::High);
+    // Enable the RHT sensor (Si7021) - requires sensor_enable HIGH per board config
+    let _sensor_enable = Output::new(board.sensor_enable, Level::High);
 
-    // Configure I2C1 for the Si7021 sensor
-    // SCL: PC_05, SDA: PC_07 (from board config)
+    // Configure I2C1 for the Si7021 sensor using board pin assignments
     let i2c_config = i2c::Config::default();
     let i2c = I2c::new(
-        p.I2C1,
-        p.PC_05, // SCL
-        p.PC_07, // SDA
+        remaining.i2c1,
+        board.sensor_scl,
+        board.sensor_sda,
         Irqs,
         i2c_config,
     );

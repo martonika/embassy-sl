@@ -19,9 +19,20 @@ defmt = [
     "embassy-embedded-hal/defmt",
 ]
 
-## Chip families
-xg24 = ["_xg24"]
-_xg24 = []
+## Chip families (user-facing, mutually exclusive)
+xg24 = ["_xg24", "silabs-pac/efr32mg24"]
+# xg21 = ["_xg21", "silabs-pac/efr32mg21"]  # future
+
+## Internal chip family features
+_xg24 = ["_eusart", "_i2c1", "_usart0", "_iadc", "_wdog"]
+# _xg21 = []  # future - different peripherals
+
+## Peripheral availability features (internal)
+_eusart = []
+_i2c1 = []
+_usart0 = []
+_iadc = []
+_wdog = []
 
 ## Secure / nonsecure
 _ns = []
