@@ -3,6 +3,7 @@
 mod macros;
 mod time_driver;
 
+pub mod boards;
 pub mod cmu;
 pub mod drivers;
 pub mod emu;
@@ -62,7 +63,6 @@ pub fn init() -> Peripherals {
     });
 
     time_driver::init(crate::interrupt::Priority::P0);
-    
 
     peripherals
 }

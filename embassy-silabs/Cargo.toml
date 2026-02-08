@@ -27,6 +27,10 @@ xg24 = ["_xg24", "silabs-pac/efr32mg24"]
 _xg24 = ["_eusart", "_i2c1", "_usart0", "_iadc", "_wdog"]
 # _xg21 = []  # future - different peripherals
 
+## Board support features (automatically enable correct chip family)
+board-brd4186c = ["xg24"]  # xG24 Dev Kit (EFR32MG24)
+board-brd2601b = ["xg24"]  # Thunderboard Sense 2 (EFR32MG24)
+
 ## Peripheral availability features (internal)
 _eusart = []
 _i2c1 = []
@@ -55,7 +59,7 @@ cortex-m = "0.7.7"
 cortex-m-rt = "0.7.5"
 critical-section = "1.2.0"
 defmt = { version = "1.0.1", optional = true }
-defmt-rtt = { version = "1.0.0", optional = true }
+defmt-rtt = { version = "1.1.0", optional = true }
 
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", optional = true }
 embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", optional = true, features = [
@@ -64,7 +68,7 @@ embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", optio
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", optional = true, features = [
     "arch-cortex-m",
 ] }
-embassy-hal-internal = { version = "0.2.0", features = [
+embassy-hal-internal = { version = "0.4.0", features = [
     "cortex-m",
     "prio-bits-3",
 ], git = "https://github.com/embassy-rs/embassy.git" }
@@ -75,14 +79,14 @@ embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy.git", 
 
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
-embedded-io = "0.6.1"
+embedded-io = "0.7.1"
 embedded-graphics-core = "0.4"
-embedded-storage = "0.3"
+embedded-storage = "0.3.1"
 silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = ["rt"] }
 futures-util = { version = "0.3.31", default-features = false }
-bitflags = "2.9.1"
-embedded-io-async = "0.6.1"
+bitflags = "2.10.0"
+embedded-io-async = "0.7.0"
 
 # Optional dependencies for memory LCD driver
-ls013b7dh03 = { version = "0.4", optional = true }
-embedded-graphics = { version = "0.8", optional = true }
+ls013b7dh03 = { version = "0.4.2", optional = true }
+embedded-graphics = { version = "0.8.1", optional = true }

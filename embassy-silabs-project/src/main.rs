@@ -5,14 +5,14 @@ use embassy_executor::Spawner;
 
 use core::sync::atomic::{AtomicI32, Ordering};
 use defmt::*;
+use embassy_silabs::boards::brd4186c::Board;
 use embassy_silabs::drivers::display::memlcd::{
-    extcomin_task_owned, MemLcd, MemLcdConfig, SpiConfig,
+    MemLcd, MemLcdConfig, SpiConfig, extcomin_task_owned,
 };
 use embassy_silabs::drivers::sensor::Si7021;
 use embassy_silabs::gpio::*;
 use embassy_silabs::i2c::{self, I2c};
 use embassy_silabs::{bind_interrupts, peripherals};
-use embassy_silabs_boards::brd4186c::Board;
 use embassy_time::Timer;
 use heapless::String;
 use {defmt_rtt as _, panic_probe as _}; // global logger
@@ -23,13 +23,13 @@ use {defmt_rtt as _, panic_probe as _}; // global logger
 
 // embedded-graphics imports
 use embedded_graphics::{
+    Drawable,
     geometry::Point,
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    mono_font::{MonoTextStyle, ascii::FONT_6X10},
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{Circle, PrimitiveStyle, Rectangle},
     text::{Alignment, Text, TextStyleBuilder},
-    Drawable,
 };
 
 // SPI frequency for memory LCD (1.1 MHz max)
@@ -58,7 +58,8 @@ where
     Text::with_text_style("embassy-silabs", Point::new(64, 20), style, text_style).draw(display)?;
 
     // "hello from Rust" centered below
-    Text::with_text_style("hello from Rust", Point::new(64, 35), style, text_style).draw(display)?;
+    Text::with_text_style("hello from Rust", Point::new(64, 35), style, text_style)
+        .draw(display)?;
 
     // Display sensor readings if available
     let sensor_valid = SENSOR_VALID.load(Ordering::Relaxed);
@@ -71,9 +72,17 @@ where
         let temp_frac = (temp_centi % 100).abs() / 10;
         let mut temp_str: String<20> = String::new();
         if temp_centi < 0 && temp_whole == 0 {
-            core::fmt::write(&mut temp_str, format_args!("Temp: -{}.{} C", temp_whole.abs(), temp_frac)).ok();
+            core::fmt::write(
+                &mut temp_str,
+                format_args!("Temp: -{}.{} C", temp_whole.abs(), temp_frac),
+            )
+            .ok();
         } else {
-            core::fmt::write(&mut temp_str, format_args!("Temp: {}.{} C", temp_whole, temp_frac)).ok();
+            core::fmt::write(
+                &mut temp_str,
+                format_args!("Temp: {}.{} C", temp_whole, temp_frac),
+            )
+            .ok();
         }
         Text::with_text_style(&temp_str, Point::new(64, 55), style, text_style).draw(display)?;
 
@@ -120,9 +129,8 @@ where
         let dot_size = if i == current_pos { 4 } else { 2 };
 
         // Only draw current and adjacent positions for spinning effect
-        let distance = ((i as i32 - current_pos as i32).abs()).min(
-            num_positions as i32 - (i as i32 - current_pos as i32).abs(),
-        );
+        let distance = ((i as i32 - current_pos as i32).abs())
+            .min(num_positions as i32 - (i as i32 - current_pos as i32).abs());
 
         if distance <= 3 {
             Rectangle::new(
@@ -190,10 +198,10 @@ async fn main(spawner: Spawner) {
     let sensor = Si7021::new(i2c);
 
     // Spawn tasks
-    unwrap!(spawner.spawn(blink_led(led0)));
-    unwrap!(spawner.spawn(extcomin_task_owned(disp_extcomin, 60)));
-    unwrap!(spawner.spawn(sensor_task(sensor)));
-    unwrap!(spawner.spawn(display_task(display)));
+    spawner.spawn(unwrap!(blink_led(led0)));
+    spawner.spawn(unwrap!(extcomin_task_owned(disp_extcomin, 60)));
+    spawner.spawn(unwrap!(sensor_task(sensor)));
+    spawner.spawn(unwrap!(display_task(display)));
 }
 
 /// Blink LED0 as a heartbeat indicator

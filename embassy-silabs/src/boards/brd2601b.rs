@@ -25,8 +25,8 @@
 //! | Sensor Enable   | PC09 | Powers most sensors      |
 //! | Mic Enable      | PC08 | Powers microphone        |
 
-use embassy_silabs::peripherals::*;
-use embassy_silabs::{Peri, Peripherals};
+use crate::peripherals::*;
+use crate::{Peri, Peripherals};
 
 /// Pin polarity for LEDs
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

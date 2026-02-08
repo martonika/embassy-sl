@@ -15,6 +15,7 @@
 #![macro_use]
 #![warn(missing_docs)]
 
+use core::fmt;
 use core::future::poll_fn;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -83,6 +84,18 @@ pub enum Error {
     /// RX buffer overflow - data lost.
     Overflow,
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Framing => write!(f, "Framing error"),
+            Error::Parity => write!(f, "Parity error"),
+            Error::Overflow => write!(f, "RX buffer overflow"),
+        }
+    }
+}
+
+impl core::error::Error for Error {}
 
 /// Internal state shared between driver instances.
 pub(crate) struct State {
@@ -172,7 +185,8 @@ fn set_baudrate(r: pac::usart::Usart, ref_freq: u32, baudrate: u32, ovs: Ovs) {
     // Use integer division with rounding
     // CLKDIV/8 = (32 * refFreq) / (baudrate * oversample) - 32
     let clkdiv = if oversample > 0 {
-        let div_intermediate = (32 * ref_freq + (baudrate * oversample / 2)) / (baudrate * oversample);
+        let div_intermediate =
+            (32 * ref_freq + (baudrate * oversample / 2)) / (baudrate * oversample);
         let clkdiv = div_intermediate.saturating_sub(32) * 8;
         clkdiv & 0x001F_FFF8 // Mask to valid range (20-bit, lower 3 bits reserved)
     } else {
@@ -252,8 +266,8 @@ impl<'d, T: Instance> Usart<'d, T> {
         rx: Peri<'d, impl GpioPin>,
         tx: Peri<'d, impl GpioPin>,
         _irq: impl interrupt::typelevel::Binding<T::RxInterrupt, RxInterruptHandler<T>>
-            + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
-            + 'd,
+        + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
+        + 'd,
         config: Config,
     ) -> Self {
         Self::new_inner(usart, rx.into(), tx.into(), None, None, config)
@@ -267,8 +281,8 @@ impl<'d, T: Instance> Usart<'d, T> {
         cts: Peri<'d, impl GpioPin>,
         rts: Peri<'d, impl GpioPin>,
         _irq: impl interrupt::typelevel::Binding<T::RxInterrupt, RxInterruptHandler<T>>
-            + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
-            + 'd,
+        + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
+        + 'd,
         config: Config,
     ) -> Self {
         Self::new_inner(
@@ -311,7 +325,8 @@ impl<'d, T: Instance> Usart<'d, T> {
 
         // Configure hardware flow control
         if config.hw_flow_control && cts.is_some() {
-            r.ctrlx().modify(|w| w.set_ctsen(pac::usart::vals::Ctsen::ENABLE));
+            r.ctrlx()
+                .modify(|w| w.set_ctsen(pac::usart::vals::Ctsen::ENABLE));
         }
 
         // Set baud rate

@@ -25,8 +25,8 @@
 //! | VCOM Enable    | PB00 | GPIO, enables VCOM       |
 //! | Sensor Enable  | PD03 | GPIO, enables RHT sensor |
 
-use embassy_silabs::peripherals::*;
-use embassy_silabs::{Peri, Peripherals};
+use crate::peripherals::*;
+use crate::{Peri, Peripherals};
 
 /// Pin polarity for LEDs
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,7 +45,7 @@ pub struct Board {
     // LEDs
     /// LED 0 - Green LED on PB02
     pub led0: Peri<'static, PB_02>,
-    /// LED 1 - Green LED on PB04  
+    /// LED 1 - Green LED on PB04
     pub led1: Peri<'static, PB_04>,
 
     // Buttons
@@ -146,7 +146,7 @@ impl Board {
             led0: p.PB_02,
             led1: p.PB_04,
 
-            // Buttons  
+            // Buttons
             btn0: p.PB_01,
             btn1: p.PB_03,
 

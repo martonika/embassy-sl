@@ -15,6 +15,7 @@
 #![macro_use]
 #![warn(missing_docs)]
 
+use core::fmt;
 use core::future::poll_fn;
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -88,6 +89,20 @@ pub enum Error {
     /// TX FIFO overflow.
     TxOverflow,
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Framing => write!(f, "Framing error"),
+            Error::Parity => write!(f, "Parity error"),
+            Error::Overflow => write!(f, "RX FIFO overflow"),
+            Error::Underflow => write!(f, "RX FIFO underflow"),
+            Error::TxOverflow => write!(f, "TX FIFO overflow"),
+        }
+    }
+}
+
+impl core::error::Error for Error {}
 
 /// Internal state shared between driver instances.
 pub(crate) struct State {
@@ -265,8 +280,8 @@ impl<'d, T: Instance> Eusart<'d, T> {
         rx: Peri<'d, impl GpioPin>,
         tx: Peri<'d, impl GpioPin>,
         _irq: impl interrupt::typelevel::Binding<T::RxInterrupt, InterruptHandler<T>>
-            + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
-            + 'd,
+        + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
+        + 'd,
         config: Config,
     ) -> Self {
         Self::new_inner(eusart, rx.into(), tx.into(), None, None, config)
@@ -280,8 +295,8 @@ impl<'d, T: Instance> Eusart<'d, T> {
         cts: Peri<'d, impl GpioPin>,
         rts: Peri<'d, impl GpioPin>,
         _irq: impl interrupt::typelevel::Binding<T::RxInterrupt, InterruptHandler<T>>
-            + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
-            + 'd,
+        + interrupt::typelevel::Binding<T::TxInterrupt, TxInterruptHandler<T>>
+        + 'd,
         config: Config,
     ) -> Self {
         Self::new_inner(
