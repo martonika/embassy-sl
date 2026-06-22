@@ -1,0 +1,19 @@
+[package]
+name = "silabs-bluetooth-sys"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level FFI bindings to Silicon Labs Bluetooth LE host/controller for EFR32xG24"
+keywords = ["efr32", "bluetooth", "ble", "embedded", "no-std"]
+categories = ["embedded", "hardware-support", "no-std"]
+
+[dependencies]
+cty = "0.2"
+
+[build-dependencies]
+bindgen = "0.72.1"
+
+[features]
+default = ["ble"]
+ble = []
+## PSA-backed host crypto (required for Bluetooth Mesh provisionee).
+psa-crypto = []

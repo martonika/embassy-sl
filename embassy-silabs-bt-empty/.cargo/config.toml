@@ -1,0 +1,13 @@
+[target.thumbv8m.main-none-eabi]
+runner = [
+    "probe-rs", "run",
+    "--chip", "EFR32MG24B220F1536IM48",
+    "--chip-description-path", "target-desc/EFR32MG24_Series.yaml",
+]
+
+[build]
+target = "thumbv8m.main-none-eabi"
+
+[env]
+DEFMT_LOG = "info"
+DEFMT_RTT_BUFFER_SIZE = "16384"

@@ -1,0 +1,6 @@
+#ifndef SL_BGAPI_CONFIG_H
+#define SL_BGAPI_CONFIG_H
+
+#define SL_BGAPI_MAX_PAYLOAD_SIZE (256)
+
+#endif

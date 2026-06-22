@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "silabs-pac",
+    "silabs-rail-sys",
+    "silabs-bluetooth-sys",
+    "silabs-btmesh-sys",
+    "silabs-csdk",
+    "embassy-silabs",
+    "embassy-silabs-project",
+    "embassy-silabs-bt-empty",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[profile.release]
+debug = 2

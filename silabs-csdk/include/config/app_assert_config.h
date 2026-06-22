@@ -1,0 +1,6 @@
+#ifndef APP_ASSERT_CONFIG_H
+#define APP_ASSERT_CONFIG_H
+
+#define APP_ASSERT_ENABLE 0
+
+#endif

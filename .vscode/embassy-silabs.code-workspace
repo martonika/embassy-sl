@@ -8,11 +8,21 @@
     },
     {
       "path": "../embassy-silabs-project"
+    },
+    {
+      "path": "../embassy-silabs-bt-empty"
     }
   ],
   "settings": {
     "rust-analyzer.check.allTargets": false,
     "rust-analyzer.check.extraArgs": ["--target", "thumbv8m.main-none-eabi"],
-    "rust-analyzer.files.exclude": ["silabs-pac/**"]
+    "rust-analyzer.files.exclude": ["silabs-pac/**"],
+    "rust-analyzer.linkedProjects": [
+    "../embassy-silabs/Cargo.toml",
+    "../embassy-silabs-boards/Cargo.toml",
+    "../silabs-pac/Cargo.toml",
+    "../embassy-silabs-project/Cargo.toml",
+    "../embassy-silabs-btmesh-project/Cargo.toml"
+  ]
   }
 }

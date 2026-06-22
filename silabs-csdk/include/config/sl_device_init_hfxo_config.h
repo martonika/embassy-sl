@@ -1,0 +1,10 @@
+#ifndef SL_DEVICE_INIT_HFXO_CONFIG_H
+#define SL_DEVICE_INIT_HFXO_CONFIG_H
+
+/* BRD4186C xG24 Dev Kit: 39 MHz HFXO, CTUNE from board config brd4186c_brd4002a. */
+#define SL_DEVICE_INIT_HFXO_MODE      cmuHfxoOscMode_Crystal
+#define SL_DEVICE_INIT_HFXO_FREQ      39000000
+#define SL_DEVICE_INIT_HFXO_PRECISION 50
+#define SL_DEVICE_INIT_HFXO_CTUNE     87
+
+#endif

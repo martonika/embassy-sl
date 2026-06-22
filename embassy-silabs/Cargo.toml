@@ -28,8 +28,8 @@ _xg24 = ["_eusart", "_i2c1", "_usart0", "_iadc", "_wdog"]
 # _xg21 = []  # future - different peripherals
 
 ## Board support features (automatically enable correct chip family)
-board-brd4186c = ["xg24"]  # xG24 Dev Kit (EFR32MG24)
-board-brd2601b = ["xg24"]  # Thunderboard Sense 2 (EFR32MG24)
+board-brd4186c = ["xg24"] # xG24 Dev Kit (EFR32MG24)
+board-brd2601b = ["xg24"] # Thunderboard Sense 2 (EFR32MG24)
 
 ## Peripheral availability features (internal)
 _eusart = []
@@ -54,21 +54,41 @@ _time-driver = [
 ## Memory LCD driver support (LS013B7DH03 and similar displays)
 memlcd-driver = ["dep:ls013b7dh03", "dep:embedded-graphics"]
 
+## RAIL proprietary radio (requires local Simplicity SDK via SILABS_SDK)
+rail = ["dep:silabs-rail-sys", "dep:silabs-csdk"]
+
+## Bluetooth LE host + controller (single-protocol RAIL, not multiprotocol)
+ble = [
+    "dep:silabs-bluetooth-sys",
+    "dep:silabs-csdk",
+    "silabs-csdk/ble",
+    "silabs-rail-sys/rail",
+]
+
+## Bluetooth Mesh provisionee node (requires `ble`)
+btmesh = [
+    "ble",
+    "dep:silabs-btmesh-sys",
+    "silabs-csdk/btmesh",
+    "silabs-btmesh-sys/btmesh",
+    "silabs-bluetooth-sys/psa-crypto",
+]
+
 [dependencies]
 cortex-m = "0.7.7"
 cortex-m-rt = "0.7.5"
 critical-section = "1.2.0"
-defmt = { version = "1.0.1", optional = true }
-defmt-rtt = { version = "1.1.0", optional = true }
+defmt = { version = "1.1.0", optional = true }
+defmt-rtt = { version = "1.2.0", optional = true }
 
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", optional = true }
 embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", optional = true, features = [
     "tick-hz-32_768",
 ] }
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", optional = true, features = [
-    "arch-cortex-m",
+    "platform-cortex-m",
 ] }
-embassy-hal-internal = { version = "0.4.0", features = [
+embassy-hal-internal = { version = "0.5.0", features = [
     "cortex-m",
     "prio-bits-3",
 ], git = "https://github.com/embassy-rs/embassy.git" }
@@ -83,10 +103,21 @@ embedded-io = "0.7.1"
 embedded-graphics-core = "0.4"
 embedded-storage = "0.3.1"
 silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = ["rt"] }
-futures-util = { version = "0.3.31", default-features = false }
-bitflags = "2.10.0"
+futures-util = { version = "0.3.32", default-features = false }
+bitflags = "2.13.0"
 embedded-io-async = "0.7.0"
+
+silabs-rail-sys = { path = "../silabs-rail-sys", optional = true, default-features = false, features = [
+    "rail",
+] }
+silabs-csdk = { path = "../silabs-csdk", optional = true, default-features = false }
+silabs-bluetooth-sys = { path = "../silabs-bluetooth-sys", optional = true, default-features = false, features = [
+    "ble",
+] }
+silabs-btmesh-sys = { path = "../silabs-btmesh-sys", optional = true, default-features = false, features = [
+    "btmesh",
+] }
 
 # Optional dependencies for memory LCD driver
 ls013b7dh03 = { version = "0.4.2", optional = true }
-embedded-graphics = { version = "0.8.1", optional = true }
+embedded-graphics = { version = "0.8.2", optional = true }

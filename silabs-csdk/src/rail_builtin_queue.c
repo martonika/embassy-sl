@@ -1,0 +1,8 @@
+#include "sl_rail_types.h"
+
+#define RAIL_RX_PACKET_QUEUE_ENTRIES 4
+
+static sl_rail_packet_queue_entry_t builtin_rx_packet_queue[RAIL_RX_PACKET_QUEUE_ENTRIES];
+
+const uint16_t sl_rail_builtin_rx_packet_queue_entries = RAIL_RX_PACKET_QUEUE_ENTRIES;
+sl_rail_packet_queue_entry_t *const sl_rail_builtin_rx_packet_queue_ptr = builtin_rx_packet_queue;

@@ -1,6 +1,7 @@
 #![no_std]
 
 mod macros;
+#[cfg(feature = "_time-driver")]
 mod time_driver;
 
 pub mod boards;
@@ -16,6 +17,27 @@ pub mod spi;
 pub mod timer;
 pub mod usart;
 pub mod wdog;
+
+#[cfg(feature = "rail")]
+pub mod radio;
+
+#[cfg(feature = "ble")]
+pub mod ble;
+
+#[cfg(feature = "btmesh")]
+pub mod btmesh;
+
+#[cfg(any(feature = "rail", feature = "ble"))]
+use silabs_csdk as _;
+
+#[cfg(feature = "ble")]
+use silabs_bluetooth_sys as _;
+
+#[cfg(feature = "ble")]
+use silabs_rail_sys as _;
+
+#[cfg(feature = "btmesh")]
+use silabs_btmesh_sys as _;
 
 // This mod MUST go last, so that it sees all the `impl_foo!` macros
 #[cfg_attr(feature = "_xg24", path = "chips/efr32xg24.rs")]
@@ -62,6 +84,7 @@ pub fn init() -> Peripherals {
         w.set_msc(true);
     });
 
+    #[cfg(feature = "_time-driver")]
     time_driver::init(crate::interrupt::Priority::P0);
 
     peripherals

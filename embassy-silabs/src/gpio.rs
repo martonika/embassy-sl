@@ -26,6 +26,14 @@ impl<'d> Input<'d> {
     #[inline]
     pub fn new(pin: Peri<'d, impl Pin>, mode: vals::PortMode) -> Self {
         let mut pin = Flex::new(pin);
+        // On EFR32, INPUTPULL/INPUTPULLFILTER use DOUT to select pull direction:
+        // DOUT=1 => pull-up, DOUT=0 => pull-down.
+        if matches!(
+            mode,
+            vals::PortMode::INPUTPULL | vals::PortMode::INPUTPULLFILTER
+        ) {
+            pin.set_high();
+        }
         pin.set_as_input(mode);
 
         Self { pin }

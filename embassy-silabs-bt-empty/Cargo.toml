@@ -1,0 +1,58 @@
+[package]
+name = "embassy-silabs-bt-empty"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+default-run = "ble-empty"
+
+[dependencies]
+cortex-m = { version = "0.7.7", features = [
+    "inline-asm",
+    "critical-section-single-core",
+] }
+cortex-m-rt = "0.7.5"
+defmt = "1.1.0"
+defmt-rtt = { version = "1.2.0", features = ["disable-blocking-mode"] }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features = [
+    "defmt",
+    "platform-cortex-m",
+    "executor-thread",
+] }
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = [
+    "rt",
+    "critical-section",
+    "cortex-m-rt",
+] }
+embassy-silabs = { version = "0.1.0", path = "../embassy-silabs", default-features = false, features = [
+    "defmt",
+    "board-brd4186c",
+    "rt",
+    "xg24",
+    "_ns",
+    "ble",
+] }
+silabs-rail-sys = { path = "../silabs-rail-sys", optional = true, default-features = false, features = [
+    "rail",
+] }
+silabs-csdk = { path = "../silabs-csdk", optional = true, default-features = false }
+silabs-bluetooth-sys = { path = "../silabs-bluetooth-sys", optional = true, default-features = false, features = [
+    "ble",
+] }
+
+[features]
+default = ["ble-empty"]
+ble-empty = [
+    "dep:silabs-csdk",
+    "dep:silabs-rail-sys",
+    "dep:silabs-bluetooth-sys",
+    "embassy-silabs/ble",
+    "silabs-csdk/ble",
+    "silabs-csdk/ble-rust-handler",
+    "silabs-rail-sys/rail",
+]
+
+[[bin]]
+name = "ble-empty"
+path = "src/bin/ble_empty.rs"
+required-features = ["ble-empty"]

@@ -2,9 +2,7 @@
 name = "embassy-silabs-project"
 version = "0.1.0"
 edition = "2024"
-
-[profile.release]
-debug = 2
+build = "build.rs"
 
 [dependencies]
 cortex-m = { version = "0.7.7", features = [
@@ -12,11 +10,11 @@ cortex-m = { version = "0.7.7", features = [
     "critical-section-single-core",
 ] }
 cortex-m-rt = "0.7.5"
-defmt = "1.0.1"
-defmt-rtt = "1.0.0"
+defmt = "1.1.0"
+defmt-rtt = "1.2.0"
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features = [
     "defmt",
-    "arch-cortex-m",
+    "platform-cortex-m",
     "executor-thread",
 ] }
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", features = [
@@ -34,10 +32,10 @@ embassy-silabs = { version = "0.1.0", path = "../embassy-silabs", features = [
     "board-brd4186c",
 ] }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git" }
-static_cell = "2.1.0"
+static_cell = "2.1.1"
 embedded-graphics = "0.8"
 libm = "0.2"
-heapless = "0.8"
+heapless = "0.9.3"
 
 [dev-dependencies]
-embedded-test = "0.6.1"
+embedded-test = "0.7.1"

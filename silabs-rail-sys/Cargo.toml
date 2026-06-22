@@ -1,0 +1,20 @@
+[package]
+name = "silabs-rail-sys"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level FFI bindings to Silicon Labs RAIL for EFR32xG24"
+keywords = ["efr32", "rail", "radio", "embedded", "no-std"]
+categories = ["embedded", "hardware-support", "no-std"]
+
+[dependencies]
+cty = "0.2"
+
+[build-dependencies]
+bindgen = "0.72.1"
+
+[features]
+default = ["rail"]
+## Link the single-protocol RAIL blob (proprietary PHY / simple TRX).
+rail = []
+## Link the multiprotocol RAIL blob (required for BLE coexistence).
+rail-multiprotocol = []

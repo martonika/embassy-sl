@@ -1,0 +1,17 @@
+[package]
+name = "silabs-csdk"
+version = "0.1.0"
+edition = "2024"
+description = "Silicon Labs SDK C support code for RAIL/BLE/Mesh on EFR32MG24"
+links = "silabs_csdk"
+
+[features]
+default = []
+ble = []
+## Application provides sl_bt_on_event + deferred adv start in Rust.
+ble-rust-handler = ["ble"]
+btmesh = ["ble"]
+btmesh-c-handlers = ["btmesh"]
+
+[build-dependencies]
+cc = "1.2"

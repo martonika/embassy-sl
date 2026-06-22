@@ -1,0 +1,20 @@
+[package]
+name = "silabs-btmesh-sys"
+version = "0.1.0"
+edition = "2024"
+description = "Low-level FFI bindings to Silicon Labs Bluetooth Mesh for EFR32xG24"
+keywords = ["efr32", "bluetooth", "mesh", "embedded", "no-std"]
+categories = ["embedded", "hardware-support", "no-std"]
+
+[dependencies]
+cty = "0.2"
+silabs-bluetooth-sys = { path = "../silabs-bluetooth-sys", default-features = false, features = [
+    "ble",
+] }
+
+[build-dependencies]
+bindgen = "0.71"
+
+[features]
+default = ["btmesh"]
+btmesh = []
