@@ -26,6 +26,7 @@
 //! | Sensor Enable  | PD03 | GPIO, enables RHT sensor |
 
 use crate::peripherals::*;
+use crate::prs::AsyncChannel;
 use crate::{Peri, Peripherals};
 
 /// Pin polarity for LEDs
@@ -211,5 +212,14 @@ impl Board {
         };
 
         (board, remaining)
+    }
+
+    /// Route RACL PAEN (TX) and LNAEN (RX) PRS signals to LED0 and LED1.
+    ///
+    /// LED0 lights during TX, LED1 during RX. Consumes the LED pins; do not use
+    /// [`Output`](crate::gpio::Output) on them afterward.
+    pub fn route_rf_activity_leds(self) {
+        crate::prs::route_racl_paen(AsyncChannel::new(0), self.led0);
+        crate::prs::route_racl_lnaen(AsyncChannel::new(1), self.led1);
     }
 }

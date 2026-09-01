@@ -13,7 +13,7 @@ silabs-bluetooth-sys = { path = "../silabs-bluetooth-sys", default-features = fa
 ] }
 
 [build-dependencies]
-bindgen = "0.71"
+bindgen = "0.72.1"
 
 [features]
 default = ["btmesh"]

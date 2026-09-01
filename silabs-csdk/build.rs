@@ -50,7 +50,6 @@ fn sdk_rail_sources(sdk: &Path) -> Vec<PathBuf> {
         pc.join("emlib/src/em_timer.c"),
         pc.join("emlib/src/em_msc.c"),
         pc.join("common/src/sl_core_cortexm.c"),
-        pc.join("common/src/sl_assert.c"),
         pc.join("service/device_init/src/sl_device_init_hfxo_s2.c"),
         pc.join("service/device_init/src/sl_device_init_dcdc_s2.c"),
         pc.join("service/device_init/src/sl_device_init_emu_s2.c"),

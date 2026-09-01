@@ -1,0 +1,13 @@
+#ifndef SL_RF_ACTIVITY_LED_CONFIG_H
+#define SL_RF_ACTIVITY_LED_CONFIG_H
+
+/* BRD4186C: route RAC PAEN (TX) / LNAEN (RX) to LED0 / LED1 via PRS. */
+#define SL_RF_ACTIVITY_LED_TX_PRS_CH  0
+#define SL_RF_ACTIVITY_LED_TX_PORT    gpioPortB
+#define SL_RF_ACTIVITY_LED_TX_PIN     2
+
+#define SL_RF_ACTIVITY_LED_RX_PRS_CH  1
+#define SL_RF_ACTIVITY_LED_RX_PORT    gpioPortB
+#define SL_RF_ACTIVITY_LED_RX_PIN     4
+
+#endif

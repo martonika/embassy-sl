@@ -17,6 +17,7 @@
 #include "pa_conversions_efr32.h"
 #include "sl_rail_util_pti.h"
 #include "sl_rail_util_power_manager_init.h"
+#include "silabs_rf_activity_leds.h"
 
 #if defined(SILABS_CSDK_BTMESH)
 #include "sl_btmesh.h"

@@ -13,6 +13,8 @@ pub mod gpio;
 pub mod i2c;
 pub mod iadc;
 pub mod ldma;
+#[cfg(feature = "_xg24")]
+pub mod prs;
 pub mod spi;
 pub mod timer;
 pub mod usart;

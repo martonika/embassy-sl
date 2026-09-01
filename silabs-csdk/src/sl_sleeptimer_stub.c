@@ -24,7 +24,7 @@ static uint32_t hal_get_counter(void)
 
 static uint32_t ticks32_to_ms(uint32_t tick)
 {
-    return (tick >> 15) * 1000U + ((tick & 0x7FFFU) * 1000U) >> 15;
+    return (tick >> 15) * 1000U + (((tick & 0x7FFFU) * 1000U) >> 15);
 }
 
 static uint64_t ticks64_to_ms(uint64_t tick)

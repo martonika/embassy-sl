@@ -11,7 +11,6 @@ mod ble_runtime;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_silabs::boards::brd4186c::Board;
-use embassy_silabs::gpio::{Level, Output};
 use {defmt_rtt as _, panic_probe as _};
 
 #[allow(dead_code)]
@@ -92,8 +91,6 @@ unsafe extern "C" {
     fn silabs_bgapi_sysrtc_cnt() -> u32;
 }
 
-/// Half second at 32768 Hz.
-const LED_TOGGLE_TICKS: u32 = 16_384;
 /// Two seconds at 32768 Hz.
 const RF_LOG_TICKS: u32 = 65_536;
 
@@ -136,26 +133,18 @@ async fn main(_spawner: Spawner) {
     info!("ble main step=after_embassy_init");
 
     let (board, _) = Board::new(p);
-    info!("ble main step=after_board_new");
-    let mut led = Output::new(board.led0, Level::Low);
+    board.route_rf_activity_leds();
+    info!("ble main step=after_board_new rf_activity_leds=prs");
 
     info!("ble main step=before_init_stack");
     ble_runtime::init_stack();
     info!("ble main step=after_init_stack");
 
-    let mut last_led_rtc = unsafe { silabs_bgapi_sysrtc_cnt() };
-    let mut last_log_rtc = last_led_rtc;
+    let mut last_log_rtc = unsafe { silabs_bgapi_sysrtc_cnt() };
     let mut first_log = true;
 
     ble_runtime::pump_loop(|| {
         let rtc = unsafe { silabs_bgapi_sysrtc_cnt() };
-
-        if unsafe { silabs_bgapi_ble_system_boot_handler_done() } != 0 {
-            if rtc.wrapping_sub(last_led_rtc) >= LED_TOGGLE_TICKS {
-                last_led_rtc = rtc;
-                led.toggle();
-            }
-        }
 
         if first_log || rtc.wrapping_sub(last_log_rtc) >= RF_LOG_TICKS {
             first_log = false;
