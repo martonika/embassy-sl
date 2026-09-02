@@ -1,6 +1,7 @@
 #include "sl_rail_types.h"
 
-#define RAIL_RX_PACKET_QUEUE_ENTRIES 4
+/* EFR32: power-of-2 entries in [8, 512]. */
+#define RAIL_RX_PACKET_QUEUE_ENTRIES 16
 
 static sl_rail_packet_queue_entry_t builtin_rx_packet_queue[RAIL_RX_PACKET_QUEUE_ENTRIES];
 

@@ -3,10 +3,12 @@
 This document records what was required to get the Silicon Labs BLE host/controller
 **running under Embassy Rust** on BRD4186C (EFR32MG24B220F1536IM48).
 
-**Paused:** 2026-06-22 · tag `ble-empty-discover-v60`
+**Resumed:** 2026-09-02 · tag `ble-empty-discover-v60` (RAIL HW path proven; BLE RF still open)
 
 Host-level init and HCI→link-layer **advertising enable** work (`adv4=0x4000000`, `ll_en=2`, `add_task=1`).
-**On-air RF is not confirmed** — `usch` stuck at 1/1, `ll_tx=0`, RAIL `cfg/stx/tx=0` after extended pumping.
+BLE **on-air advertising is not confirmed** — `usch` stuck at 1/1, `ll_tx=0`, RAIL `cfg/stx/tx=0`
+after extended pumping. Standalone RAIL CW + packet TX **do** work (see below), so the BLE stall
+is **above RAIL** (HCI/LL/scheduler), not clocks/PA/IRQs/hardware TX.
 
 Reference target: Silicon Labs `bt_soc_empty` (advertise as **"Embassy BLE"**, connectable
 legacy advertising).
@@ -413,7 +415,32 @@ hci=on/off/total → hci_le_set_extended_advertising_enable on/off/total calls
 
 ---
 
-## Current status (paused 2026-06-22, tag `ble-empty-discover-v60`)
+## Standalone RAIL isolation (2026-09-02)
+
+Isolated the radio from the BLE host/LL to decide whether dead BLE RF was hardware or
+stack/glue. Used feature `rail-test` / bin `rail-test` (removed after PASS; helpers remain
+under `embassy-silabs` `rail` + `silabs-csdk` non-BLE RAIL init).
+
+| Stage | Test | Result |
+|-------|------|--------|
+| 1 | Continuous-wave `sl_rail_start_tx_stream` on IEEE 802.15.4 ch 11 (2405 MHz) | **PASS** — `stage=6 status=0x0`; LED0 (PAEN) stayed lit for 10 s, then off |
+| 2 | Immediate packet TX: FIFO + `sl_rail_start_tx`, 20 frames | **PASS** — `sent=20 aborted=0 underflow=0 start_fail=0 timeout=0`; `TX_PACKET_SENT` for all; LED0 blinked ~10 Hz |
+
+Notes from that bring-up (keep if redoing RAIL-only work):
+
+- RX packet queue must be power-of-2 in **[8, 512]** (4 entries → `sl_rail_init` `0x21`).
+- Sequencer image for B220 (+20 dBm): `RAIL_SEQ_IMAGE_PA_20_DBM`.
+- Non-BLE IRQ glue: `silabs_radio_irq_vectors_plain.c` (cortex-m-rt → `*_IRQHandler`).
+- LED1 (LNAEN) stayed on after packet TX: expected — IEEE 802.15.4 config transitions
+  TX success → **RX**. Nearby BLE traffic does not explain it on this PHY.
+
+**Conclusion:** Clocks, HFXO, PA, sequencer, radio IRQs, PRS LEDs, and RAIL TX work.
+BLE advertising gap is **link-layer / HCI / scheduler** (and remaining LTO HCI wraps), not
+a dead radio.
+
+---
+
+## Current status (resumed 2026-09-02, tag `ble-empty-discover-v60`)
 
 ### Host + init — works
 
@@ -426,26 +453,33 @@ hci=on/off/total → hci_le_set_extended_advertising_enable on/off/total calls
 | `handler_done=1`, pump `steps` > 1000 | OK |
 | PendSV | `irq p` ≈ 46 |
 
-### Link layer / RF — not working
+### Standalone RAIL — works (2026-09-02)
+
+CW + 20× packet TX with `TX_PACKET_SENT`; see section above.
+
+### BLE link layer / on-air — not working
 
 | Item | v60 (~2 s runtime) |
 |------|---------------------|
 | nRF Connect | **Not seen** |
 | `usch` | **Stuck 1/1** |
 | `ll_tx`, `rail cfg/stx/tx` | **0** |
-| MODEM/FRC IRQs | **0** |
+| MODEM/FRC IRQs under BLE | **0** |
 
 ### Interpretation
 
-v56 opened the HCI→LL enable path. RF stalls after task queue: `usch_ScheduleProcess` does
-not run again and RAIL TX is never invoked. Next: wrap remaining HCI adv commands; debug
-scheduler time / `LL_EVENT_SCHEDULE` delivery.
+v56 opened the HCI→LL **enable** path. After `usch_AddTask`, `usch_ScheduleProcess` does
+not progress and BLE never calls RAIL TX — while standalone RAIL TX succeeds. Next:
+
+1. Wrap remaining HCI adv commands (`parameters`, `data`) like enable.
+2. Debug `LL_EVENT_SCHEDULE` / scheduler time (`sli_ll_get_current_time_us` / RAIL time).
+3. Confirm BLE path reaches `ll_tx` / `rail stx/tx` / MODEM·FRC IRQs, then nRF Connect.
 
 See [`ble-investigation-handoff.md`](../ble-investigation-handoff.md) for full timeline.
 
 ---
 
-## History (v50–v60 summary)
+## History (v50–v60 + RAIL isolation)
 
 | Tag | Milestone |
 |-----|-----------|
@@ -453,7 +487,8 @@ See [`ble-investigation-handoff.md`](../ble-investigation-handoff.md) for full t
 | v54 | Reference config parity, `sli_bt_stack_functional_init` |
 | v56 | **HCI enable wrap + `ll_hciCall`** — `ll_en` / `add_task` non-zero |
 | v57–v59 | Init pump hang fixes (defer adv, scheduler gating) |
-| v60 | Startup LL pump — RF still idle |
+| v60 | Startup LL pump — BLE RF still idle |
+| 2026-09-02 | Standalone RAIL CW + packet TX **PASS** — HW/RAIL OK; BLE gap above RAIL |
 
 ---
 

@@ -1,12 +1,15 @@
 # BLE Advertising Investigation Handoff (BRD4186C / EFR32MG24)
 
-**Paused:** 2026-06-22 · build tag `ble-empty-discover-v60`
+**Resumed:** 2026-09-02 · build tag `ble-empty-discover-v60`
+
+Standalone RAIL CW + packet TX **PASS** (see `embassy-silabs-bt-empty/BLE_BRINGUP.md`).
+Hardware/RAIL/IRQs/PA are fine; remaining work is BLE HCI/LL/scheduler.
 
 ## Goal
 
 Bring up connectable BLE advertising (`"Embassy BLE"`) discoverable in nRF Connect.
 
-## Current status (v60)
+## Current status (v60 + RAIL isolation)
 
 ### Host + init — works
 
@@ -49,7 +52,7 @@ sli_ll_init.c: LL_EVENT_SCHEDULE → usch_ScheduleProcess → … → RAIL TX
 
 ### Remaining RF gap (v60)
 
-HCI **enable** reaches the LL (`ll_en`, `add_task` non-zero), but **`usch_ScheduleProcess` does not progress** after init (count stays 1) and RAIL TX never runs. Likely causes when resuming:
+HCI **enable** reaches the LL (`ll_en`, `add_task` non-zero), but **`usch_ScheduleProcess` does not progress** after init (count stays 1) and BLE never invokes RAIL TX. **Not** a dead radio: isolation test proved CW + immediate packet TX with `TX_PACKET_SENT`. Likely causes when resuming:
 
 1. Other HCI setup commands (`set_extended_advertising_parameters`, `_data`) still use LTO-broken path — wrap like enable.
 2. `usch_ScheduleProcess` inner `while (usch_TrySchedule() == false)` may spin or stall without valid `sli_ll_get_current_time_us()` / RAIL time.

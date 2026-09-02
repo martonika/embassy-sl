@@ -30,7 +30,6 @@ embassy-silabs = { version = "0.1.0", path = "../embassy-silabs", default-featur
     "rt",
     "xg24",
     "_ns",
-    "ble",
 ] }
 silabs-rail-sys = { path = "../silabs-rail-sys", optional = true, default-features = false, features = [
     "rail",

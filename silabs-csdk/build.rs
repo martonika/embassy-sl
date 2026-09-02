@@ -501,7 +501,6 @@ fn main() {
         build.define("MBEDTLS_PSA_CRYPTO_CONFIG_FILE", "<psa_crypto_config.h>");
     }
 
-    build.file(manifest_dir.join("src/silabs_bgapi_debug.c"));
     build.file(manifest_dir.join("src/string.c"));
     build.file(manifest_dir.join("src/sl_gpio_stub.c"));
     build.file(manifest_dir.join("src/sl_power_manager_stub.c"));
@@ -510,6 +509,12 @@ fn main() {
     build.file(manifest_dir.join("src/rail_callbacks.c"));
     build.file(manifest_dir.join("src/rail_builtin_queue.c"));
     build.file(manifest_dir.join("src/rail_platform_init.c"));
+    if ble {
+        build.file(manifest_dir.join("src/silabs_bgapi_debug.c"));
+        build.file(manifest_dir.join("src/silabs_radio_irq_vectors.c"));
+    } else {
+        build.file(manifest_dir.join("src/silabs_radio_irq_vectors_plain.c"));
+    }
 
     for src in sdk_rail_sources(&sdk) {
         build.file(src);
@@ -519,7 +524,6 @@ fn main() {
         build.file(manifest_dir.join("src/silabs_bt_stack_start.c"));
         build.file(manifest_dir.join("src/sl_btctrl_pendsv.c"));
         build.file(manifest_dir.join("src/silabs_linklayer_pump.c"));
-        build.file(manifest_dir.join("src/silabs_radio_irq_vectors.c"));
         build.file(manifest_dir.join("src/silabs_rf_diag.c"));
         build.file(manifest_dir.join("src/silabs_bgmessage_stub.c"));
         build.file(manifest_dir.join("src/sl_device_init_clocks.c"));

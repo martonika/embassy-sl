@@ -12,7 +12,19 @@ static RAIL_INITIALIZED: AtomicBool = AtomicBool::new(false);
 unsafe extern "C" {
     fn silabs_rail_platform_init();
     fn silabs_rail_handle() -> rail::RAIL_Handle_t;
+    fn silabs_rail_init_stage() -> u32;
+    fn silabs_rail_init_status() -> u32;
+    fn silabs_rail_start_carrier_wave(channel: u16) -> u32;
+    fn silabs_rail_stop_tx_stream() -> u32;
+    fn silabs_rail_tx_packet(channel: u16, data: *const u8, len: u16) -> u32;
 }
+
+/// RAIL event bit: packet transmitted successfully.
+pub const EVENT_TX_PACKET_SENT: u32 = 1 << 24;
+/// RAIL event bit: transmit aborted.
+pub const EVENT_TX_ABORTED: u32 = 1 << 26;
+/// RAIL event bit: TX FIFO underflow.
+pub const EVENT_TX_UNDERFLOW: u32 = 1 << 30;
 
 /// Initialize the RAIL platform (HFXO, clocks, RAIL library).
 ///
@@ -29,6 +41,48 @@ pub fn init() {
 /// Raw RAIL handle after [`init`].
 pub fn handle() -> rail::RAIL_Handle_t {
     unsafe { silabs_rail_handle() }
+}
+
+/// Last completed standalone RAIL initialization stage.
+pub fn init_stage() -> u32 {
+    unsafe { silabs_rail_init_stage() }
+}
+
+/// Status returned by the standalone RAIL initialization sequence.
+pub fn init_status() -> u32 {
+    unsafe { silabs_rail_init_status() }
+}
+
+/// Start an unmodulated carrier on an IEEE 802.15.4 channel.
+pub fn start_carrier_wave(channel: u16) -> Result<(), u32> {
+    let status = unsafe { silabs_rail_start_carrier_wave(channel) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(status)
+    }
+}
+
+/// Stop a carrier or PN9 stream and return the radio to idle.
+pub fn stop_tx_stream() -> Result<(), u32> {
+    let status = unsafe { silabs_rail_stop_tx_stream() };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(status)
+    }
+}
+
+/// Write `data` to the TX FIFO and start an immediate transmit on `channel`.
+pub fn tx_packet(channel: u16, data: &[u8]) -> Result<(), u32> {
+    let status = unsafe {
+        silabs_rail_tx_packet(channel, data.as_ptr(), data.len() as u16)
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(status)
+    }
 }
 
 /// Poll and clear accumulated RAIL events.
@@ -48,28 +102,9 @@ pub fn start_rx_channel_11() -> Result<(), u32> {
     }
 }
 
-/// Transmit a packet buffer.
+/// Transmit a packet buffer on channel 11 (legacy helper).
 pub fn write_tx_fifo(data: &[u8]) -> Result<(), u32> {
-    let handle = handle();
-    let written = unsafe {
-        rail::RAIL_WriteTxFifo(
-            handle,
-            data.as_ptr() as *mut u8,
-            data.len() as u16,
-            true,
-        )
-    };
-    if written == 0 {
-        return Err(u32::MAX);
-    }
-    let status = unsafe {
-        rail::RAIL_StartTx(handle, 11, 0, core::ptr::null())
-    };
-    if status == 0 {
-        Ok(())
-    } else {
-        Err(status)
-    }
+    tx_packet(11, data)
 }
 
 #[unsafe(no_mangle)]
