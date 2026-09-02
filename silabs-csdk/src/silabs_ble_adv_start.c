@@ -82,6 +82,12 @@ void silabs_ble_startup_ll_pump(void)
     sl_bt_priority_handle();
     silabs_ble_step_bt_pump();
   }
+  /*
+   * Do NOT call usch_ScheduleProcess() here. With a queued adv task it can
+   * spin forever in while (!usch_TrySchedule()) or block in task Init
+   * (v61 hang after "after_init_stack"). Gating left usch real=0; forcing
+   * real schedule must be done carefully with time/task diagnostics first.
+   */
   silabs_ll_hci_post_service_set(0u);
 }
 

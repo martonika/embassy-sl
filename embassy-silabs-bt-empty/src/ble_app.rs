@@ -54,7 +54,7 @@ fn generate_adv_data() -> u32 {
 
 fn set_pending_adv_start() {
     unsafe { PENDING_ADV_START = 1 };
-    defmt::info!("ble adv pending=1");
+    // defmt::info!("ble adv pending=1");
 }
 
 #[unsafe(no_mangle)]

@@ -160,12 +160,15 @@ fn link_ble_libraries(sdk: &Path, out_dir: &Path, psa_crypto: bool) {
     );
 
     let bgapi = sdk.join("bgapi_protocol/build/gcc/cortex-m33");
-    let bgapi_libs: [(&str, &str); 7] = [
+    // 2026.12+: protocol/task (libbgapi_task.a) provides sli_bgapi_task_step /
+    // sli_bgapi_shared_task used by host core timer + sl_bt_run.
+    let bgapi_libs: [(&str, &str); 8] = [
         ("bgapi_trace/release", "bgapi_trace_stub"),
         ("protocol/command/release", "bgapi_command"),
         ("protocol/core/release", "bgapi_core"),
         ("protocol/device/release", "bgapi_device"),
         ("protocol/event/release", "bgapi_event"),
+        ("protocol/task/release", "bgapi_task"),
         ("protocol/release", "bgapi_protocol"),
         (
             "rtos_adaptation/release",

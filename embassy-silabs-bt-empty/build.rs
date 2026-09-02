@@ -17,26 +17,16 @@ fn main() {
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 
     if env::var("CARGO_FEATURE_BLE_EMPTY").is_ok() {
-        println!("cargo:rustc-env=BLE_EMPTY_BUILD_TAG=ble-empty-discover-v60");
+        println!("cargo:rustc-env=BLE_EMPTY_BUILD_TAG=ble-empty-discover-v70");
+        // Pull strong RAIL_BLE_Phy* from silabs_rail_ble_phy_force.c (overrides
+        // librail weak NULL stubs). rust-lld wants -uSYM not -Wl,-u,SYM.
+        println!("cargo:rustc-link-arg-bins=-usilabs_force_rail_ble_phys");
         println!("cargo:rustc-link-arg-bins=--wrap=sl_btctrl_init_functional");
         println!("cargo:rustc-link-arg-bins=--wrap=ubt_run");
         println!("cargo:rustc-link-arg-bins=--wrap=hci_le_set_extended_advertising_enable");
+        println!("cargo:rustc-link-arg-bins=--wrap=hci_le_set_extended_advertising_parameters");
         println!("cargo:rustc-link-arg-bins=--wrap=usch_ScheduleProcess");
-        println!("cargo:rustc-link-arg-bins=--wrap=usch_ScheduleReqCB");
-        println!("cargo:rustc-link-arg-bins=--wrap=sli_ll_adv_set_advertising_enable");
-        println!("cargo:rustc-link-arg-bins=--wrap=ll_execTimingInit");
-        println!("cargo:rustc-link-arg-bins=--wrap=usch_AddTask");
-        println!("cargo:rustc-link-arg-bins=--wrap=sli_ll_mbox_message_cb");
         println!("cargo:rustc-link-arg-bins=--wrap=sl_btctrl_raise_events");
-        println!("cargo:rustc-link-arg-bins=--wrap=sl_btctrl_process_events");
-        println!("cargo:rustc-link-arg-bins=--wrap=sli_ll_radio_raise_error");
-        println!("cargo:rustc-link-arg-bins=--wrap=sli_ll_radio_raise_ll_events");
-        println!("cargo:rustc-link-arg-bins=--wrap=sli_ll_radio_schedule_tx");
-        println!("cargo:rustc-link-arg-bins=--wrap=sl_rail_init");
-        println!("cargo:rustc-link-arg-bins=--wrap=sl_rail_ble_init");
-        println!("cargo:rustc-link-arg-bins=--wrap=sl_rail_start_tx");
-        println!("cargo:rustc-link-arg-bins=--wrap=sl_rail_start_scheduled_tx");
-        println!("cargo:rustc-link-arg-bins=--wrap=sl_rail_ble_config_channel_radio_params");
         println!("cargo:rustc-link-arg-bins=--wrap=bg_message_queue_wait_time");
         // Force-link RAIL radio IRQ handlers and cortex-m-rt vector wrapper symbols.
         for sym in [

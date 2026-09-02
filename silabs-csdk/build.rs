@@ -60,8 +60,8 @@ fn sdk_rail_sources(sdk: &Path) -> Vec<PathBuf> {
         rail.join("plugin/pa-auto-mode/pa_auto_mode.c"),
         rail.join("plugin/sl_rail_util_power_manager_init/sl_rail_util_power_manager_init.c"),
         rail.join("plugin/sl_rail_util_sequencer/sl_rail_util_sequencer.c"),
-        rail.join("plugin/sl_rail_util_built_in_phys/sl_rail_util_built_in_phys.c"),
         rail.join("plugin/sl_rail_util_pti/sl_rail_util_pti.c"),
+        // BLE 39 MHz channel configs; pointers forced via silabs_rail_ble_phy_force.c + -u.
         rail.join("plugin/sl_rail_util_built_in_phys/efr32xg24/sl_rail_ble_config_39MHz.c"),
         rail.join("plugin/sl_rail_util_built_in_phys/efr32xg24/sl_rail_ieee802154_config_39MHz.c"),
         rail.join("plugin/sl_rail_util_built_in_phys/efr32xg24/sl_rail_rfsense_ook_config_39MHz.c"),
@@ -141,7 +141,7 @@ fn sdk_ble_sources(sdk: &Path) -> Vec<PathBuf> {
         mem.join("src/sl_memory_manager_pool_common.c"),
         mem.join("src/sl_memory_manager_pool.c"),
         mem.join("src/sl_memory_manager_region.c"),
-        mem.join("profiler/src/sli_memory_profiler_stubs.c"),
+        // 2026.6: profiler/src/sli_memory_profiler_stubs.c (removed in 2026.12)
         mem.join("hal/sli_memory_manager_retention_control_hal_none.c"),
         pc.join("common/src/sl_slist.c"),
     ];
@@ -397,22 +397,28 @@ fn base_includes(sdk: &Path, manifest_dir: &Path) -> Vec<PathBuf> {
 }
 
 fn ble_includes(sdk: &Path) -> Vec<PathBuf> {
+    let pc = sdk.join("platform_core/platform");
     vec![
         sdk.join("bluetooth_le_controller/inc"),
         sdk.join("bluetooth_le_controller/config"),
         sdk.join("bluetooth_le_host/inc"),
         sdk.join("bluetooth_le_host/config"),
+        // Present in older SDKs; absent in 2026.12 (apply_common_cc_flags skips missing dirs)
         sdk.join("bluetooth_le_host/legacy_to_refactor/bgstack/ubt"),
         sdk.join("bluetooth_common/inc"),
         sdk.join("bluetooth_common/config"),
         sdk.join("bgapi_protocol/protocol/inc"),
         sdk.join("bgapi_protocol/config"),
-        sdk.join("platform_core/platform/service/memory_manager/inc"),
-        sdk.join("platform_core/platform/service/memory_manager/src"),
-        sdk.join("platform_core/platform/service/memory_manager/config"),
-        sdk.join("platform_core/platform/service/memory_manager/config/legacy"),
-        sdk.join("platform_core/platform/service/memory_manager/profiler/inc"),
-        sdk.join("platform_core/platform/service/memory_manager/profiler/config"),
+        // New in 2026.12: memory_manager includes sli_memory_manager_log.h → sl_log
+        pc.join("service/sl_log/inc"),
+        pc.join("service/sl_log/config"),
+        pc.join("service/memory_manager/inc"),
+        pc.join("service/memory_manager/src"),
+        pc.join("service/memory_manager/config"),
+        pc.join("service/memory_manager/config/legacy"),
+        // Present in older SDKs; removed in 2026.12
+        pc.join("service/memory_manager/profiler/inc"),
+        pc.join("service/memory_manager/profiler/config"),
     ]
 }
 
@@ -501,6 +507,7 @@ fn main() {
         build.define("MBEDTLS_PSA_CRYPTO_CONFIG_FILE", "<psa_crypto_config.h>");
     }
 
+    build.file(manifest_dir.join("src/silabs_bgapi_debug.c"));
     build.file(manifest_dir.join("src/string.c"));
     build.file(manifest_dir.join("src/sl_gpio_stub.c"));
     build.file(manifest_dir.join("src/sl_power_manager_stub.c"));
@@ -509,12 +516,6 @@ fn main() {
     build.file(manifest_dir.join("src/rail_callbacks.c"));
     build.file(manifest_dir.join("src/rail_builtin_queue.c"));
     build.file(manifest_dir.join("src/rail_platform_init.c"));
-    if ble {
-        build.file(manifest_dir.join("src/silabs_bgapi_debug.c"));
-        build.file(manifest_dir.join("src/silabs_radio_irq_vectors.c"));
-    } else {
-        build.file(manifest_dir.join("src/silabs_radio_irq_vectors_plain.c"));
-    }
 
     for src in sdk_rail_sources(&sdk) {
         build.file(src);
@@ -524,7 +525,7 @@ fn main() {
         build.file(manifest_dir.join("src/silabs_bt_stack_start.c"));
         build.file(manifest_dir.join("src/sl_btctrl_pendsv.c"));
         build.file(manifest_dir.join("src/silabs_linklayer_pump.c"));
-        build.file(manifest_dir.join("src/silabs_rf_diag.c"));
+        build.file(manifest_dir.join("src/silabs_radio_irq_vectors.c"));
         build.file(manifest_dir.join("src/silabs_bgmessage_stub.c"));
         build.file(manifest_dir.join("src/sl_device_init_clocks.c"));
         build.file(manifest_dir.join("src/sl_bluetooth.c"));
@@ -534,16 +535,12 @@ fn main() {
             build.file(manifest_dir.join("src/silabs_ble_adv_start.c"));
             build.file(manifest_dir.join("src/silabs_ble_radio_irq_enable.c"));
             build.file(manifest_dir.join("src/silabs_sleeptimer_platform_stubs.c"));
-            build.file(manifest_dir.join("src/silabs_ll_dispatch_diag.c"));
+            build.file(manifest_dir.join("src/silabs_ble_hci_usch.c"));
             build.file(manifest_dir.join("src/silabs_ll_hci_post_service.c"));
             build.file(manifest_dir.join("src/silabs_ll_hci_call.c"));
             build.file(manifest_dir.join("src/silabs_btctrl_init_wrap.c"));
             build.file(manifest_dir.join("src/silabs_ll_raise_wrap.c"));
-            build.file(manifest_dir.join("src/silabs_ll_radio_error_wrap.c"));
-            build.file(manifest_dir.join("src/silabs_ll_radio_events_wrap.c"));
-            build.file(manifest_dir.join("src/silabs_ll_radio_schedule_wrap.c"));
-            build.file(manifest_dir.join("src/silabs_rail_api_wrap.c"));
-            build.file(manifest_dir.join("src/silabs_btctrl_process_events_wrap.c"));
+            build.file(manifest_dir.join("src/silabs_rail_ble_phy_force.c"));
             build.file(manifest_dir.join("src/psa_crypto_stub.c"));
             build.file(manifest_dir.join("src/ble_crypto_stub.c"));
         } else if !btmesh {

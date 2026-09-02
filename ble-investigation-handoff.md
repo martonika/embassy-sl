@@ -1,62 +1,36 @@
 # BLE Advertising Investigation Handoff (BRD4186C / EFR32MG24)
 
-**Resumed:** 2026-09-02 · build tag `ble-empty-discover-v60`
-
-Standalone RAIL CW + packet TX **PASS** (see `embassy-silabs-bt-empty/BLE_BRINGUP.md`).
-Hardware/RAIL/IRQs/PA are fine; remaining work is BLE HCI/LL/scheduler.
+**Resumed:** 2026-09-02 · build tag `ble-empty-discover-v61` · SDK `sisdk-2026.12`
 
 ## Goal
 
 Bring up connectable BLE advertising (`"Embassy BLE"`) discoverable in nRF Connect.
 
-## Current status (v60 + RAIL isolation)
+## Current status (v61)
 
-### Host + init — works
+### Build on SDK 2026.12 — fixed
 
-| Item | v60 observation |
-|------|-----------------|
-| Full init through `ble init done` | OK |
-| `adv4=0x4000000` (step 4, `sc=0x00`) | OK |
-| `handler_done=1`, main loop runs | OK |
-| `hci=1/1/2` at init | HCI enable wrap fired (on + off during setup) |
-| `add_task=1/1`, `ll_en=2/0x0` | LL adv enable + scheduler task queue reached |
-| `usch=1/1` at init | Schedule requested once during adv enable |
-| `rail init/ble=1/1` | RAIL + RAIL-BLE init succeed |
-| PendSV | `irq p` ≈ 46 after ~2 s pumping |
+- Missing `sl_log_component.h` (new `platform/.../service/sl_log`)
+- Link `libbgapi_task.a` (`sli_bgapi_task_*`)
+- Dropped removed memory_manager profiler stub
 
-### Link layer / RF — not working
+### RF hypothesis (v61)
 
-| Item | v60 observation (runtime, ~2 s) |
-|------|-----------------------------------|
-| nRF Connect visibility | **Not seen** |
-| `usch` sched/req | **Stuck at 1 / 1** (no further `ScheduleProcess` after init) |
-| `ll_tx` | **0** |
-| `rail cfg/stx/tx` | **0 / 0 / 0** |
-| `irq m/f` (MODEM/FRC) | **0 / 0** |
-| `steps` | 1230+ (pump running; RF path idle) |
+v60 `usch=1/1` was almost certainly a **gated** `ScheduleProcess` during deferred adv start
+(`schedule_allow_real=0`). `LL_EVENT_SCHEDULE` is then cleared without running the real
+scheduler (`bluetooth-le/.../scheduler/scheduler.c`). v61:
 
-### Root cause found (v56, SDK source)
+- Counters: `usch=total/real/gated/req`
+- After ungating, `startup_ll_pump` calls `usch_ScheduleProcess()` once
 
-Prebuilt `libble_host.a` (LTO) **elides `ll_hciCall`** between `hci_command_init_shared` and `hci_command_shared_response` for all legacy `hci_adv.c` commands. Host reads a stale success response; the controller handler never ran.
+### Still open
 
-**Source path (Silicon Labs `bluetooth_le_controller`):**
+1. Flash v61; check `usch real` > 0 and whether `ll_tx` / RAIL TX move
+2. Wrap `hci_le_set_extended_advertising_parameters` / `_data` (same LTO `ll_hciCall` gap)
+3. If real ScheduleProcess spins: `usch_GetTimeCB` / RAIL time
 
-```
-hci_adv.c: hci_command_init_shared → ll_hciCall(handler) → hci_command_shared_response
-ll_hci.c:  ll_hci.call = handler; raise LL_EVENT_HCI_MESSAGE; sync invoke handler
-ll_hci_adv.c: ll_hciCmdSetExtendedAdvertisingEnable → sli_ll_adv_set_advertising_enable → usch_AddTask
-sli_ll_init.c: LL_EVENT_SCHEDULE → usch_ScheduleProcess → … → RAIL TX
-```
+Source trees: `~/silabs/bluetooth-le`, `~/silabs/rail` (no binary disassembly).
 
-**Fix applied:** `__wrap_hci_le_set_extended_advertising_enable` in [`silabs_ll_dispatch_diag.c`](silabs-csdk/src/silabs_ll_dispatch_diag.c) re-implements the `hci_adv.c` sequence and calls `ll_hciCall(ll_hciCmdSetExtendedAdvertisingEnable)`. Strong `ll_hciCall` from [`silabs_ll_hci_call.c`](silabs-csdk/src/silabs_ll_hci_call.c).
-
-### Remaining RF gap (v60)
-
-HCI **enable** reaches the LL (`ll_en`, `add_task` non-zero), but **`usch_ScheduleProcess` does not progress** after init (count stays 1) and BLE never invokes RAIL TX. **Not** a dead radio: isolation test proved CW + immediate packet TX with `TX_PACKET_SENT`. Likely causes when resuming:
-
-1. Other HCI setup commands (`set_extended_advertising_parameters`, `_data`) still use LTO-broken path — wrap like enable.
-2. `usch_ScheduleProcess` inner `while (usch_TrySchedule() == false)` may spin or stall without valid `sli_ll_get_current_time_us()` / RAIL time.
-3. Real `ScheduleProcess` was gated during init (v59); startup pump (v60) did not raise `usch` count — pending `LL_EVENT_SCHEDULE` may not be re-processed.
 
 ## Investigation method
 

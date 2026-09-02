@@ -17,13 +17,6 @@ extern ll_hci_t ll_hci;
 extern void sli_ll_raise_events(uint32_t events);
 extern void sl_bt_priority_handle(void);
 
-static volatile uint32_t diag_ll_hci_call_count;
-
-uint32_t silabs_bgapi_ll_hci_call_count(void)
-{
-  return diag_ll_hci_call_count;
-}
-
 /*
  * Silicon Labs ll_hci.c: queue the command handler, raise LL_EVENT_HCI_MESSAGE,
  * then invoke synchronously. Required for hci_le_set_extended_advertising_enable
@@ -31,7 +24,6 @@ uint32_t silabs_bgapi_ll_hci_call_count(void)
  */
 void ll_hciCall(ll_hciCmdHandler cmd)
 {
-  diag_ll_hci_call_count++;
   ll_hci.call = cmd;
   sli_ll_raise_events(0x80000000u);
   __asm volatile("" ::: "memory");

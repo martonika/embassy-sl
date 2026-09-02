@@ -29,28 +29,7 @@ static volatile uint32_t bgapi_ble_identity_status;
 static volatile uint8_t bgapi_ble_system_boot_handler_done;
 static volatile uint32_t bgapi_ble_on_event_called;
 static volatile uint32_t bgapi_ble_scan_request_count;
-static volatile uint32_t bgapi_ble_ll_events_total;
-static volatile uint32_t bgapi_ble_ll_events_batches;
-static volatile uint32_t bgapi_ble_hci_drain_iterations;
 static volatile uint8_t bgapi_ble_adv_start_pump_done;
-static volatile uint32_t bgapi_irq_modem_count;
-static volatile uint32_t bgapi_irq_frc_count;
-static volatile uint32_t bgapi_irq_frc_pri_count;
-static volatile uint32_t bgapi_irq_rac_seq_count;
-static volatile uint32_t bgapi_irq_sysrtc_seq_count;
-static volatile uint32_t bgapi_irq_sysrtc_app_count;
-static volatile uint32_t bgapi_irq_protimer_count;
-static volatile uint32_t bgapi_irq_agc_count;
-static volatile uint32_t bgapi_irq_bufc_count;
-static volatile uint32_t bgapi_irq_emudg_count;
-static volatile uint32_t bgapi_irq_rac_rsm_count;
-static volatile uint32_t bgapi_irq_hostmailbox_count;
-static volatile uint32_t bgapi_irq_synth_count;
-static volatile uint32_t bgapi_irq_rfeca0_count;
-static volatile uint32_t bgapi_irq_rfeca1_count;
-static volatile uint32_t bgapi_irq_pendsv_count;
-static volatile uint32_t bgapi_ll_raise_total;
-static volatile uint32_t bgapi_ll_raise_batches;
 
 extern void sli_ll_shm_save(void *address);
 extern void *sli_ll_shm_get(void);
@@ -122,7 +101,7 @@ uint32_t silabs_bgapi_ble_on_event_called(void)
 
 void silabs_bgapi_ble_identity_address_read(uint8_t out[6])
 {
-  for (uint8_t i = 0; i < 6; i++) {
+  for (unsigned i = 0; i < 6; i++) {
     out[i] = bgapi_ble_identity_addr[i];
   }
 }
@@ -134,7 +113,7 @@ uint8_t silabs_bgapi_ble_identity_address_type(void)
 
 void silabs_bgapi_ble_on_air_adv_address_read(uint8_t out[6])
 {
-  for (uint8_t i = 0; i < 6; i++) {
+  for (unsigned i = 0; i < 6; i++) {
     out[i] = bgapi_ble_on_air_adv_addr[i];
   }
 }
@@ -151,16 +130,16 @@ uint8_t silabs_bgapi_ble_on_air_adv_address_valid(void)
 
 void silabs_bgapi_note_ble_on_air_adv_address(const uint8_t address[6], uint8_t addr_type)
 {
-  for (uint8_t i = 0; i < 6; i++) {
+  for (unsigned i = 0; i < 6; i++) {
     bgapi_ble_on_air_adv_addr[i] = address[i];
   }
   bgapi_ble_on_air_adv_addr_type = addr_type;
-  bgapi_ble_on_air_adv_addr_valid = 1;
+  bgapi_ble_on_air_adv_addr_valid = 1u;
 }
 
 void silabs_bgapi_note_ble_identity_address(const uint8_t address[6], uint8_t addr_type)
 {
-  for (uint8_t i = 0; i < 6; i++) {
+  for (unsigned i = 0; i < 6; i++) {
     bgapi_ble_identity_addr[i] = address[i];
   }
   bgapi_ble_identity_addr_type = addr_type;
@@ -186,132 +165,6 @@ void silabs_bgapi_note_ble_on_event_called(void)
   bgapi_ble_on_event_called++;
 }
 
-void silabs_bgapi_note_irq_modem(void)
-{
-  bgapi_irq_modem_count++;
-}
-
-void silabs_bgapi_note_irq_frc(void)
-{
-  bgapi_irq_frc_count++;
-}
-
-void silabs_bgapi_note_irq_frc_pri(void)
-{
-  bgapi_irq_frc_pri_count++;
-}
-
-void silabs_bgapi_note_irq_rac_seq(void)
-{
-  bgapi_irq_rac_seq_count++;
-}
-
-void silabs_bgapi_note_irq_sysrtc_seq(void)
-{
-  bgapi_irq_sysrtc_seq_count++;
-}
-
-void silabs_bgapi_note_irq_sysrtc_app(void)
-{
-  bgapi_irq_sysrtc_app_count++;
-}
-
-void silabs_bgapi_note_irq_protimer(void)
-{
-  bgapi_irq_protimer_count++;
-}
-
-void silabs_bgapi_note_irq_agc(void)
-{
-  bgapi_irq_agc_count++;
-}
-
-void silabs_bgapi_note_irq_bufc(void)
-{
-  bgapi_irq_bufc_count++;
-}
-
-void silabs_bgapi_note_irq_emudg(void)
-{
-  bgapi_irq_emudg_count++;
-}
-
-void silabs_bgapi_note_irq_rac_rsm(void)
-{
-  bgapi_irq_rac_rsm_count++;
-}
-
-void silabs_bgapi_note_irq_hostmailbox(void)
-{
-  bgapi_irq_hostmailbox_count++;
-}
-
-void silabs_bgapi_note_irq_synth(void)
-{
-  bgapi_irq_synth_count++;
-}
-
-void silabs_bgapi_note_irq_rfeca0(void)
-{
-  bgapi_irq_rfeca0_count++;
-}
-
-void silabs_bgapi_note_irq_rfeca1(void)
-{
-  bgapi_irq_rfeca1_count++;
-}
-
-void silabs_bgapi_note_irq_pendsv(void)
-{
-  bgapi_irq_pendsv_count++;
-}
-
-uint32_t silabs_bgapi_irq_modem_count(void)
-{
-  return bgapi_irq_modem_count;
-}
-
-uint32_t silabs_bgapi_irq_frc_count(void)
-{
-  return bgapi_irq_frc_count;
-}
-
-uint32_t silabs_bgapi_irq_rac_seq_count(void)
-{
-  return bgapi_irq_rac_seq_count;
-}
-
-uint32_t silabs_bgapi_irq_sysrtc_seq_count(void)
-{
-  return bgapi_irq_sysrtc_seq_count;
-}
-
-uint32_t silabs_bgapi_irq_sysrtc_app_count(void)
-{
-  return bgapi_irq_sysrtc_app_count;
-}
-
-uint32_t silabs_bgapi_irq_pendsv_count(void)
-{
-  return bgapi_irq_pendsv_count;
-}
-
-void silabs_bgapi_note_ll_raise(uint32_t events)
-{
-  bgapi_ll_raise_batches++;
-  bgapi_ll_raise_total += events;
-}
-
-uint32_t silabs_bgapi_ll_raise_total(void)
-{
-  return bgapi_ll_raise_total;
-}
-
-uint32_t silabs_bgapi_ll_raise_batches(void)
-{
-  return bgapi_ll_raise_batches;
-}
-
 uint32_t silabs_bgapi_ble_scan_request_count(void)
 {
   return bgapi_ble_scan_request_count;
@@ -322,32 +175,6 @@ void silabs_bgapi_note_ble_scan_request(void)
   bgapi_ble_scan_request_count++;
 }
 
-void silabs_bgapi_note_ll_events(uint32_t events)
-{
-  bgapi_ble_ll_events_batches++;
-  bgapi_ble_ll_events_total += events;
-}
-
-uint32_t silabs_bgapi_ble_ll_events_total(void)
-{
-  return bgapi_ble_ll_events_total;
-}
-
-uint32_t silabs_bgapi_ble_ll_events_batches(void)
-{
-  return bgapi_ble_ll_events_batches;
-}
-
-uint32_t silabs_bgapi_ble_hci_drain_iterations(void)
-{
-  return bgapi_ble_hci_drain_iterations;
-}
-
-void silabs_bgapi_note_hci_drain_iterations(uint32_t iterations)
-{
-  bgapi_ble_hci_drain_iterations += iterations;
-}
-
 uint8_t silabs_bgapi_ble_adv_start_pump_done(void)
 {
   return bgapi_ble_adv_start_pump_done;
@@ -355,7 +182,7 @@ uint8_t silabs_bgapi_ble_adv_start_pump_done(void)
 
 void silabs_bgapi_note_ble_adv_start_pump_done(void)
 {
-  bgapi_ble_adv_start_pump_done = 1;
+  bgapi_ble_adv_start_pump_done = 1u;
 }
 
 void silabs_bgapi_note_bt_start_status(sl_status_t status)

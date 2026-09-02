@@ -32,6 +32,8 @@ void silabs_ble_scheduler_set_enabled(uint8_t enabled);
 uint8_t silabs_ble_scheduler_enabled_read(void);
 void silabs_ble_schedule_allow_real(uint8_t allow);
 uint8_t silabs_ble_schedule_allow_real_read(void);
+/* One-shot real usch_ScheduleProcess after deferred adv queues the task. */
+void silabs_ble_try_real_schedule_once(void);
 uint32_t silabs_ble_step_phase_read(void);
 void silabs_ble_step_phase_write(uint32_t phase);
 sl_status_t silabs_ble_start_connectable_advertising(void);

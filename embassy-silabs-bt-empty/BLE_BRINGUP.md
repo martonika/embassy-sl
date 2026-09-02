@@ -3,12 +3,16 @@
 This document records what was required to get the Silicon Labs BLE host/controller
 **running under Embassy Rust** on BRD4186C (EFR32MG24B220F1536IM48).
 
-**Resumed:** 2026-09-02 · tag `ble-empty-discover-v60` (RAIL HW path proven; BLE RF still open)
+**Status:** 2026-09-02 · tag `ble-empty-discover-v70` (SDK `sisdk-2026.12`)
 
-Host-level init and HCI→link-layer **advertising enable** work (`adv4=0x4000000`, `ll_en=2`, `add_task=1`).
-BLE **on-air advertising is not confirmed** — `usch` stuck at 1/1, `ll_tx=0`, RAIL `cfg/stx/tx=0`
-after extended pumping. Standalone RAIL CW + packet TX **do** work (see below), so the BLE stall
-is **above RAIL** (HCI/LL/scheduler), not clocks/PA/IRQs/hardware TX.
+**On-air RF confirmed** (v68, rechecked on v70): nRF Connect sees **"Embassy BLE"**.
+Root fix: force-link strong `RAIL_BLE_Phy*` (`silabs_rail_ble_phy_force.c` +
+`-usilabs_force_rail_ble_phys`). librail weak NULLs left the 39 MHz PHY unloaded →
+`config_channel` `INVALID_STATE` (`0x2`) / `start_tx` `INVALID_CALL` (`0xE`).
+
+**v70:** Removed BLE/RAIL diagnostic wraps and all `--wrap=sli_*` hooks. Kept only
+functional glue (HCI LTO re-drive, `usch_ScheduleProcess` gating, raise-events wakeup
+recovery, PHY force-link). Boot tag only. Advertising still works after cleanup.
 
 Reference target: Silicon Labs `bt_soc_empty` (advertise as **"Embassy BLE"**, connectable
 legacy advertising).
@@ -21,20 +25,11 @@ Run the SDK BLE stack from an Embassy async task instead of `sl_main`, with appl
 logic in Rust (`sl_bt_on_event`) and only minimal C glue for init, pumping, and
 link-layer integration.
 
-**Success criterion for “loop running”** (host-level, not RF confirmed):
+**Success criteria (met on v68+):**
 
-- `sl_bt_evt_system_boot` is processed
-- Advertising setup steps 1–3 succeed in `sl_bt_on_event`
-- Deferred `legacy_advertiser_start()` returns `SL_STATUS_OK` (`adv_step=4 sc=0x00`)
-- `handler_done=1` and the main loop stays in phase 6 without hanging
-
-Example log tail:
-
-```
-ble step 1 end ... adv_step=4 adv_sc=0x00 handler_done=1
-ble step 6 end ... phase 6 -> 6 ... handler_done=1
-BLE advertising active: ... adv_step=4 sc=0x00 scan_req=0
-```
+- Host: `sl_bt_evt_system_boot` processed; adv setup steps 1–4 OK; pump stays alive
+- RF: nRF Connect (or equivalent scanner) sees **"Embassy BLE"**
+- Connect / GATT: **not done yet**
 
 ---
 
@@ -59,11 +54,11 @@ Main sources:
 - `silabs-csdk/src/silabs_ble_adv_start.c` — deferred `legacy_advertiser_start()`
 - `silabs-csdk/src/silabs_linklayer_pump.c` — `ubt_run` wrap, HCI drain, LL events
 - `silabs-csdk/src/silabs_ll_hci_call.c` — strong `ll_hciCall` (matches `ll_hci.c`)
-- `silabs-csdk/src/silabs_ll_dispatch_diag.c` — HCI adv enable wrap + `usch_*` diagnostics
+- `silabs-csdk/src/silabs_ble_hci_usch.c` — HCI ext-adv wraps + `usch_ScheduleProcess` gating
 - `silabs-csdk/src/silabs_bgmessage_stub.c` — non-blocking BG message wait
 - `silabs-csdk/src/sl_btctrl_pendsv.c` — `PendSV` → `sl_bt_priority_handle`
-- `silabs-csdk/src/silabs_ll_raise_wrap.c` — raise-events diagnostics
-- `silabs-csdk/src/silabs_rail_api_wrap.c` — RAIL init/TX instrumentation
+- `silabs-csdk/src/silabs_ll_raise_wrap.c` — null/invalid wakeup slot recovery
+- `silabs-csdk/src/silabs_rail_ble_phy_force.c` — strong `RAIL_BLE_Phy*` (39 MHz) + `-u`
 - `silabs-csdk/src/silabs_radio_irq_vectors.c` — cortex-m-rt → RAIL IRQ bridges
 - `reference_project/` — local Silicon Labs `bt_soc_empty` copy for diffing (**not in git**; requires separate SDK checkout)
 
@@ -112,8 +107,21 @@ ble-empty = [
 Environment:
 
 - `SILABS_SDK` — required; path to the Simplicity SDK root directory
-- Target: `thumbv8m.main-none-eabi` (see `.cargo/config.toml`)
+  (current: `/Users/manika/silabs/sisdk-2026.12`)
+- Target: `thumbv8m.main-none-eabi` (see `.cargo/config.toml` under this crate)
 - Flash/run: `cargo run --release` (probe-rs + `EFR32MG24B220F1536IM48`)
+- Source of truth for LL/HCI: `~/silabs/bluetooth-le` (not binaries)
+- Source of truth for RAIL: `~/silabs/rail`
+
+### SDK 2026.12 path deltas vs older bring-up notes
+
+| Change | Detail |
+|--------|--------|
+| `platform/.../service/sl_log/` | **New.** `memory_manager` includes `sli_memory_manager_log.h` → `sl_log_component.h`. `silabs-csdk` adds those include dirs + local `sl_log_common_config.h` with `LEVEL_NONE`. |
+| `memory_manager/profiler/` | **Removed.** Dropped `sli_memory_profiler_stubs.c` from `sdk_ble_sources`. |
+| `bgapi_protocol/.../protocol/task/` | **New** `libbgapi_task.a` (`sli_bgapi_task_step`, `sli_bgapi_shared_task`, …). Linked from `silabs-bluetooth-sys/build.rs`. |
+| `bluetooth_le_host/.../ubt` | Still missing from packaged SDK; host HCI source lives in `~/silabs/bluetooth-le/.../ubt/`. |
+| `usch_*` opacity | **Lifted** for source investigation: `bluetooth-le/bluetooth_le_controller/src/scheduler/scheduler.c` has `usch_ScheduleProcess`. |
 
 GATT device name **"Embassy BLE"** comes from generated `gatt_db.c`
 (`silabs-csdk/ble/gatt_configuration.btconf`), not from `sl_bt_gap_set_device_name`.
@@ -180,17 +188,14 @@ Before each `ubt_run`, call `sli_app_timer_step()`. Keeps host app timers aligne
 Embassy’s manual stepping. (Sleeptimer advances via `SYSRTC_APP` IRQ; no explicit step
 function is called from the pump.)
 
-### `--wrap=hci_le_set_extended_advertising_enable` (`silabs_ll_dispatch_diag.c`) — **critical v56**
+### `--wrap=hci_le_set_extended_advertising_enable` / `_parameters` (`silabs_ble_hci_usch.c`) — **critical v56/v63**
 
 Prebuilt `libble_host.a` (LTO) **skips `ll_hciCall`** between `hci_command_init_shared` and
-`hci_command_shared_response`. The wrap re-implements `hci_adv.c` (under
-`bluetooth_le_host/legacy_to_refactor/bgstack/ubt/` in the SDK) and calls
-`ll_hciCall(ll_hciCmdSetExtendedAdvertisingEnable)`.
+`hci_command_shared_response`. The wraps re-drive controller HCI so enable and parameters
+reach the LL.
 
 Strong `ll_hciCall` in [`silabs_ll_hci_call.c`](../silabs-csdk/src/silabs_ll_hci_call.c) matches
 controller `ll_hci.c` (`bluetooth_le_controller/src/ll_hci.c`, `ll_hci.call` mailbox).
-
-**Still needed:** same treatment for `hci_le_set_extended_advertising_parameters` and `_data`.
 
 ### `ll_hciCall` post-service (`silabs_ll_hci_post_service.c` + pump)
 
@@ -206,60 +211,36 @@ Embassy owns the main thread.
 
 cortex-m-rt uses `PendSV` as the vector name on this target (not `PendSV_Handler`).
 
-### Deferred start implementation (`silabs_ble_adv_start.c`)
+### Deferred start + schedule gate (`silabs_ble_adv_start.c`, `silabs_ble_hci_usch.c`)
 
-After successful `legacy_advertiser_start`:
-
-```c
-silabs_ble_hci_drain();
-silabs_service_linklayer_events();
-sl_bt_priority_handle();
-```
-
-Then mark `handler_done=1` for the application log.
+Deferred `legacy_advertiser_start` runs with `usch_ScheduleProcess` gated. `pump_loop`
+then calls `silabs_ble_try_real_schedule_once()` and leaves `schedule_allow_real=1`.
 
 ### Linker flags in `embassy-silabs-bt-empty/build.rs`
 
 ```text
+--wrap=sl_btctrl_init_functional
 --wrap=ubt_run
 --wrap=hci_le_set_extended_advertising_enable
---wrap=bg_message_queue_wait_time
-```
-
-(`--wrap=ll_hciCall` removed in v56 — use strong `ll_hciCall` + HCI enable wrap instead.)
-
-Plus `-uMODEM`, `-uMODEM_IRQHandler`, etc. to force-link RAIL radio IRQ handlers (v18).
-
-Additional diagnostic wraps (v50+; do not remove while RF is open):
-
-```text
---wrap=sl_btctrl_raise_events
---wrap=sl_btctrl_process_events
---wrap=hci_le_set_extended_advertising_enable
+--wrap=hci_le_set_extended_advertising_parameters
 --wrap=usch_ScheduleProcess
---wrap=usch_ScheduleReqCB
---wrap=usch_AddTask
---wrap=sli_ll_adv_set_advertising_enable
---wrap=sli_ll_radio_schedule_tx
---wrap=sl_rail_init / sl_rail_ble_init / sl_rail_ble_config_channel_radio_params
---wrap=sl_rail_start_tx / sl_rail_start_scheduled_tx
+--wrap=sl_btctrl_raise_events
+--wrap=bg_message_queue_wait_time
+-usilabs_force_rail_ble_phys
 ```
 
-### `--wrap=sl_btctrl_raise_events` (`silabs_ll_raise_wrap.c`) — **critical fix v53**
+Plus `-uMODEM`, `-uMODEM_IRQHandler`, etc. to force-link RAIL radio IRQ handlers.
 
-The diagnostic wrap must use `&sli_bt_host_adaptation_compatibility_linklayer_wakeup`
-(the RAM slot at `0x20028920` that `sl_btctrl_raise_events` branches through).
+Do **not** wrap internal `sli_*` symbols or RAIL TX/config APIs for diagnostics.
 
-**v52 and earlier used hardcoded `0x200288d8`**, which is **`timer_processing_ongoing`**
-(a host BGAPI timer bool), not the wakeup callback. Every raised LL event corrupted that
-flag and could overwrite it with trampoline pointers. This likely broke host timer /
-scheduler state even when HCI reported advertising success.
+### `--wrap=sl_btctrl_raise_events` (`silabs_ll_raise_wrap.c`)
 
-### `silabs_service_linklayer_events()` (`silabs_linklayer_pump.c`) — fix v53
+Ensures the compatibility wakeup slot is callable before the real raise path. Uses
+`&sli_bt_host_adaptation_compatibility_linklayer_wakeup` (not a hardcoded RAM address).
+
+### `silabs_service_linklayer_events()` (`silabs_linklayer_pump.c`)
 
 Must atomically read-clear `ll_events` and call `sl_btctrl_process_events(events)`.
-Calling only `sl_bt_priority_handle()` from this helper was insufficient for explicit
-post-HCI servicing (though `sl_bt_priority_handle` itself also drains `ll_events`).
 
 ### RAIL / controller alignment vs `bt_soc_empty` (v50)
 
@@ -385,119 +366,78 @@ last wrote status); `adv_sc` = low byte status (`0x00` = OK).
 
 ---
 
-## RF diagnostics (`ble_empty.rs` log line, v53+)
+## Diagnostics removed (v70)
 
-Periodic log (every ~2 s at 32768 Hz RTC):
-
-```
-ble rf rtc=...: scan=... steps=... done=... ll_evt=peek/total usch=sched/req
-  ll_en=0x... hci_en=... irq m/f/p=modem/frc/pendsv ll_err=... ll_tx=...
-  rail cfg/stx/tx=... calls cfg/stx/tx=...
-```
-
-| Field | Meaning |
-|-------|---------|
-| `done` | `silabs_bgapi_ble_system_boot_handler_done` (1 = post-adv pump finished) |
-| `ll_evt` | `ll_events` peek / cumulative bits passed to `sl_btctrl_process_events` |
-| `usch` | `usch_ScheduleProcess` / `usch_ScheduleReqCB` call counts |
-| `ll_en` | Last status from `sli_ll_adv_set_advertising_enable` wrap |
-| `hci_en` | Last `num_sets` arg to `hci_le_set_extended_advertising_enable` (1 = on) |
-| `irq m/f/p` | MODEM / FRC / PendSV IRQ entry counts |
-| `ll_tx` | `sli_ll_radio_schedule_tx` calls |
-| `rail cfg/stx/tx` | Last RAIL status codes; `calls` = invocation counts |
-
-Init summary (`ble_runtime.rs`):
-
-```
-adv4=0xNNNNNNNN  → high byte = adv setup step (4 = start), low byte = sl_status_t
-hci=on/off/total → hci_le_set_extended_advertising_enable on/off/total calls
-```
+RF/LL/RAIL instrumentation wraps and counters are gone (`silabs_ll_radio_*_wrap`,
+`silabs_rail_api_wrap`, `sli_*` wraps, IRQ note counters, periodic `ble rf` logs).
+Do not reintroduce `--wrap=sli_*` or RAIL TX/config wraps for debugging.
 
 ---
 
-## Standalone RAIL isolation (2026-09-02)
+## Current status (v70, SDK 2026.12)
 
-Isolated the radio from the BLE host/LL to decide whether dead BLE RF was hardware or
-stack/glue. Used feature `rail-test` / bin `rail-test` (removed after PASS; helpers remain
-under `embassy-silabs` `rail` + `silabs-csdk` non-BLE RAIL init).
+### Build
 
-| Stage | Test | Result |
-|-------|------|--------|
-| 1 | Continuous-wave `sl_rail_start_tx_stream` on IEEE 802.15.4 ch 11 (2405 MHz) | **PASS** — `stage=6 status=0x0`; LED0 (PAEN) stayed lit for 10 s, then off |
-| 2 | Immediate packet TX: FIFO + `sl_rail_start_tx`, 20 frames | **PASS** — `sent=20 aborted=0 underflow=0 start_fail=0 timeout=0`; `TX_PACKET_SENT` for all; LED0 blinked ~10 Hz |
+```bash
+cd embassy-silabs-bt-empty
+export SILABS_SDK=/Users/manika/silabs/sisdk-2026.12
+cargo build --release --bin ble-empty
+```
 
-Notes from that bring-up (keep if redoing RAIL-only work):
+Boot log: `ble empty boot tag=ble-empty-discover-v70`.
 
-- RX packet queue must be power-of-2 in **[8, 512]** (4 entries → `sl_rail_init` `0x21`).
-- Sequencer image for B220 (+20 dBm): `RAIL_SEQ_IMAGE_PA_20_DBM`.
-- Non-BLE IRQ glue: `silabs_radio_irq_vectors_plain.c` (cortex-m-rt → `*_IRQHandler`).
-- LED1 (LNAEN) stayed on after packet TX: expected — IEEE 802.15.4 config transitions
-  TX success → **RX**. Nearby BLE traffic does not explain it on this PHY.
+### Host + RF — works
 
-**Conclusion:** Clocks, HFXO, PA, sequencer, radio IRQs, PRS LEDs, and RAIL TX work.
-BLE advertising gap is **link-layer / HCI / scheduler** (and remaining LTO HCI wraps), not
-a dead radio.
+| Item | Status |
+|------|--------|
+| Init / deferred adv / HCI enable | OK |
+| One-shot real `usch_ScheduleProcess` then `schedule_allow_real` | OK |
+| RAIL TX path | OK after PHY force-link |
+| nRF Connect sees **"Embassy BLE"** | Confirmed on v68; rechecked on v70 |
+| Connect / GATT | Not started |
 
----
+### RAIL PHY force-link (the RF root cause)
 
-## Current status (resumed 2026-09-02, tag `ble-empty-discover-v60`)
+`librail_efr32xg24_*.a` exports **weak NULL** stubs for `RAIL_BLE_Phy1MbpsViterbi` (etc.).
+With typical archive order those NULLs win, so `sl_rail_ble_config_phy_1_mbps` never loads
+a channel config → `blePhy` undefined → `sl_rail_ble_config_channel_radio_params` returns
+`0x2` (`INVALID_STATE`) → `sl_rail_start_tx` returns `0xE` (`INVALID_CALL`).
 
-### Host + init — works
+Fix: [`silabs_rail_ble_phy_force.c`](../silabs-csdk/src/silabs_rail_ble_phy_force.c)
+strongly defines the PHY pointers to 39 MHz configs; `embassy-silabs-bt-empty/build.rs`
+passes `-usilabs_force_rail_ble_phys`.
 
-| Item | v60 |
-|------|-----|
-| Init through `ble init done` | OK |
-| `adv4=0x4000000` | OK |
-| `hci=1/1/2`, `add_task=1/1`, `ll_en=2/0x0` | HCI enable wrap + LL adv enable |
-| `usch=1/1` at init | Schedule requested once |
-| `handler_done=1`, pump `steps` > 1000 | OK |
-| PendSV | `irq p` ≈ 46 |
+### Next
 
-### Standalone RAIL — works (2026-09-02)
-
-CW + 20× packet TX with `TX_PACKET_SENT`; see section above.
-
-### BLE link layer / on-air — not working
-
-| Item | v60 (~2 s runtime) |
-|------|---------------------|
-| nRF Connect | **Not seen** |
-| `usch` | **Stuck 1/1** |
-| `ll_tx`, `rail cfg/stx/tx` | **0** |
-| MODEM/FRC IRQs under BLE | **0** |
-
-### Interpretation
-
-v56 opened the HCI→LL **enable** path. After `usch_AddTask`, `usch_ScheduleProcess` does
-not progress and BLE never calls RAIL TX — while standalone RAIL TX succeeds. Next:
-
-1. Wrap remaining HCI adv commands (`parameters`, `data`) like enable.
-2. Debug `LL_EVENT_SCHEDULE` / scheduler time (`sli_ll_get_current_time_us` / RAIL time).
-3. Confirm BLE path reaches `ll_tx` / `rail stx/tx` / MODEM·FRC IRQs, then nRF Connect.
+Connect / GATT bring-up (not started).
 
 See [`ble-investigation-handoff.md`](../ble-investigation-handoff.md) for full timeline.
 
 ---
 
-## History (v50–v60 + RAIL isolation)
+## History (v50–v70 summary)
 
 | Tag | Milestone |
 |-----|-----------|
 | v50–v53 | RAIL alignment, raise-events RAM fix, RF diagnostics |
 | v54 | Reference config parity, `sli_bt_stack_functional_init` |
-| v56 | **HCI enable wrap + `ll_hciCall`** — `ll_en` / `add_task` non-zero |
+| v56 | **HCI enable wrap + `ll_hciCall`** |
 | v57–v59 | Init pump hang fixes (defer adv, scheduler gating) |
-| v60 | Startup LL pump — BLE RF still idle |
-| 2026-09-02 | Standalone RAIL CW + packet TX **PASS** — HW/RAIL OK; BLE gap above RAIL |
+| v60 | Startup LL pump — RF still idle |
+| v61 | Build on SDK 2026.12; gated-vs-real usch; forced ScheduleProcess hung |
+| v62–v65 | Schedule gating / one-shot real schedule / RTT flood control |
+| v66–v67 | Schedule runs; every TX fails `0xE` / cfg `0x2` |
+| v68 | Force-link strong `RAIL_BLE_Phy*` — **nRF Connect sees "Embassy BLE"** |
+| v69 | Disable tracing logs |
+| v70 | Remove BLE/RAIL diag wraps and all `sli_*` wraps — **adv still OK** |
 
 ---
 
 ## Source-only RF investigation (v54+)
 
 **Method:** Compare a local `bt_soc_empty` reference checkout (not in repo) with Embassy glue.
-SDK source: `bluetooth_le_controller/src/ll_hci*.c` (v56+).
-
-**Opacity boundary:** `usch_*` scheduling internals in `liblinklayer.a`.
+LL/HCI source of truth: `~/silabs/bluetooth-le` (`ll_hci*.c`, `hci_adv.c`, `scheduler/scheduler.c`).
+RAIL source of truth: `~/silabs/rail`. Do **not** disassemble prebuilt archives for investigation.
 
 ---
 
@@ -505,10 +445,10 @@ SDK source: `bluetooth_le_controller/src/ll_hci*.c` (v56+).
 
 ```bash
 cd embassy-silabs-bt-empty
-export SILABS_SDK=/path/to/simplicity-sdk
+export SILABS_SDK=/Users/manika/silabs/sisdk-2026.12
 cargo build --release --bin ble-empty
 cargo run --release
 ```
 
-Build tag at boot: `ble empty boot tag=ble-empty-discover-v60`.
+Build tag at boot: `ble empty boot tag=ble-empty-discover-v70`.
 

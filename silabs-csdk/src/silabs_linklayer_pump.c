@@ -8,7 +8,6 @@
 #include "sl_btctrl_linklayer.h"
 #include "sl_core.h"
 #include "sl_rail_types.h"
-#include "silabs_bgapi_debug.h"
 #include "silabs_ll_hci_post_service.h"
 #include "sli_bgapi.h"
 
@@ -93,10 +92,6 @@ void silabs_ble_hci_drain(void)
   while (hci_packets_waiting() && guard < 256u) {
     guard++;
     silabs_ubt_run_pumped();
-  }
-
-  if (guard > 0u) {
-    silabs_bgapi_note_hci_drain_iterations(guard);
   }
 }
 
