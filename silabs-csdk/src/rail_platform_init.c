@@ -32,6 +32,8 @@ static void platform_clock_init(void)
     CMU_ClockEnable(cmuClock_LDMA, true);
 }
 
+#if !defined(SILABS_CSDK_BLE)
+
 static sl_rail_status_t rail_init_radio(void)
 {
     sl_rail_status_t status;
@@ -116,6 +118,8 @@ static void enable_radio_irqs(void)
         NVIC_EnableIRQ(irqs[i]);
     }
 }
+
+#endif /* !SILABS_CSDK_BLE */
 
 void silabs_rail_platform_init(void)
 {

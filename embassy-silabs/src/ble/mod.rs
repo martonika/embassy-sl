@@ -8,7 +8,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 static BLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "C" {
-    fn silabs_ble_platform_init();
     fn silabs_ble_platform_init_step(step: u32);
     fn silabs_ble_step();
     fn silabs_ble_init_stage_read() -> u32;

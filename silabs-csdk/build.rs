@@ -141,7 +141,7 @@ fn sdk_ble_sources(sdk: &Path) -> Vec<PathBuf> {
         mem.join("src/sl_memory_manager_pool_common.c"),
         mem.join("src/sl_memory_manager_pool.c"),
         mem.join("src/sl_memory_manager_region.c"),
-        // 2026.6: profiler/src/sli_memory_profiler_stubs.c (removed in 2026.12)
+        mem.join("profiler/src/sli_memory_profiler_stubs.c"),
         mem.join("hal/sli_memory_manager_retention_control_hal_none.c"),
         pc.join("common/src/sl_slist.c"),
     ];
@@ -496,7 +496,6 @@ fn main() {
 
     if ble {
         build.define("SILABS_CSDK_BLE", None);
-        build.define("SL_BT_CONFIG_SET_CUSTOM_ADDRESS_FROM_NVM3", "0");
     }
     if ble_rust_handler {
         build.define("SILABS_BLE_RUST_HANDLER", None);

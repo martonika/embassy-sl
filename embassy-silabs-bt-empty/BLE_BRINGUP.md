@@ -3,16 +3,23 @@
 This document records what was required to get the Silicon Labs BLE host/controller
 **running under Embassy Rust** on BRD4186C (EFR32MG24B220F1536IM48).
 
-**Status:** 2026-09-02 · tag `ble-empty-discover-v70` (SDK `sisdk-2026.12`)
+**Status:** 2026-10-15 · tag `ble-empty-lcd-v76` (SDK `sisdk-release` / 2026.12)
 
-**On-air RF confirmed** (v68, rechecked on v70): nRF Connect sees **"Embassy BLE"**.
-Root fix: force-link strong `RAIL_BLE_Phy*` (`silabs_rail_ble_phy_force.c` +
-`-usilabs_force_rail_ble_phys`). librail weak NULLs left the 39 MHz PHY unloaded →
+**BLE on-air confirmed:** nRF Connect sees **"Embassy BLE"** (v68+, still OK on v76).
+
+**Memory LCD:** **not working** on v76 — SPI clock mux fixed (~19 MHz in logs), but
+DISP_ENABLE does not appear driven at runtime (DISP LED off; board-controller logo
+remains after reset). See [Memory LCD bring-up (v76)](#memory-lcd-bring-up-v76).
+
+**RF root cause (v68):** force-link strong `RAIL_BLE_Phy*` (`silabs_rail_ble_phy_force.c` +
+`-usilabs_force_rail_ble_phys`). librail weak NULLs left the 39 MHz PHY unloaded →
 `config_channel` `INVALID_STATE` (`0x2`) / `start_tx` `INVALID_CALL` (`0xE`).
 
-**v70:** Removed BLE/RAIL diagnostic wraps and all `--wrap=sli_*` hooks. Kept only
-functional glue (HCI LTO re-drive, `usch_ScheduleProcess` gating, raise-events wakeup
-recovery, PHY force-link). Boot tag only. Advertising still works after cleanup.
+**v70:** Removed BLE/RAIL diagnostic wraps and all `--wrap=sli_*` hooks.
+
+**v71–v76:** Async Embassy pump (removed blocking `delay.rs`), LS013 LCD task + EXTCOMIN
+task, EM01GRPCCLK left on HFRCODPLL for display SPI, `hci_le_set_extended_advertising_data`
+4-arg wrap, `SYSRTC_APP` vector conflict fixed (Embassy time driver owns it).
 
 Reference target: Silicon Labs `bt_soc_empty` (advertise as **"Embassy BLE"**, connectable
 legacy advertising).
@@ -46,8 +53,8 @@ link-layer integration.
 
 Main sources:
 
-- `embassy-silabs-bt-empty/src/bin/ble_empty.rs` — Embassy `main`, LED, logging
-- `embassy-silabs-bt-empty/src/ble_runtime.rs` — init + `ble_stack_task` loop
+- `embassy-silabs-bt-empty/src/bin/ble_empty.rs` — Embassy `main`, LCD, async BLE pump
+- `embassy-silabs-bt-empty/src/ble_runtime.rs` — `init_stack()`, `spawn_ble_pump()`, `ble_pump_task`
 - `embassy-silabs-bt-empty/src/ble_app.rs` — Rust `sl_bt_on_event`, adv configuration
 - `silabs-csdk/src/ble_platform_init.c` — stepped platform + stack init
 - `silabs-csdk/src/sl_bluetooth.c` — pump/event split (`sl_bt_run` + pop event)
@@ -68,25 +75,28 @@ Main sources:
 
 ```
 embassy main
-  ├─ embassy_silabs::init()
-  ├─ ble_runtime::init_stack()       # 9 steps + mark_initialized + post_stack_pump + adv_start
-  └─ ble_runtime::pump_loop()        # startup_ll_pump, then tight step + 5 ms delay
-        └─ embassy_silabs::ble::step()
-              ├─ silabs_ble_step_app_timer()   → sli_app_timer_step()
-              ├─ silabs_ble_step_sleeptimer()  # (empty; sleeptimer uses SYSRTC IRQ)
-              └─ silabs_ble_step_bt_host()
-                    ├─ silabs_ble_step_bt_pump()           → sl_bt_run()
-                    ├─ silabs_ble_step_bt_event()          → pop event → sl_bt_on_event (Rust)
-                    ├─ silabs_ble_finish_pending_adv_start() → legacy_advertiser_start() (C)
-                    ├─ silabs_ble_hci_drain()
-                    ├─ silabs_service_linklayer_events()     → drain ll_events
-                    └─ sl_bt_priority_handle()
+  ├─ embassy_silabs::init()           # SYSRTC time driver (SYSRTC_APP IRQ)
+  ├─ ble_runtime::init_stack()        # sync: 9 steps + post_stack_pump + identity/adv logs
+  ├─ MemLcd::new (EUSART1)            # display pins after BLE clock init
+  ├─ spawn extcomin_task_owned        # PC06 @ 60 Hz (embassy_time Ticker)
+  ├─ spawn display_task               # power_on, clear_hw, flush loop (embassy_time Timer)
+  └─ spawn ble_pump_task              # startup_ll_pump, then ble::step every 5 ms
+
+ble_pump_task → embassy_silabs::ble::step()
+  ├─ silabs_ble_step_app_timer()      → sli_app_timer_step()
+  ├─ silabs_ble_step_sleeptimer()     # phase marker only; SDK sleeptimer uses SYSRTC HAL
+  └─ silabs_ble_step_bt_host()
+        ├─ silabs_ble_step_bt_pump()           → sl_bt_run()
+        ├─ silabs_ble_step_bt_event()          → pop event → sl_bt_on_event (Rust)
+        ├─ silabs_ble_finish_pending_adv_start() → legacy_advertiser_start() (C)
+        ├─ silabs_ble_hci_drain()
+        ├─ silabs_service_linklayer_events()     → drain ll_events
+        └─ sl_bt_priority_handle()
 ```
 
-After boot, steady state is `ble::step()` as above. `init_stack()` runs a short
-`post_stack_pump` (boot event + pending adv setup), then `pump_finish` calls deferred
-`legacy_advertiser_start` with the scheduler gated. `pump_loop()` runs `startup_ll_pump`
-before the steady loop.
+`init_stack()` is **synchronous** in `main` and completes advertising setup before tasks
+run. Steady-state pumping is async via `ble_pump_task`. Display timing uses **embassy_time**
+only (`Timer` / `Ticker`); the SDK `sl_sleeptimer` stack is linked for BLE internals.
 
 ---
 
@@ -107,7 +117,7 @@ ble-empty = [
 Environment:
 
 - `SILABS_SDK` — required; path to the Simplicity SDK root directory
-  (current: `/Users/manika/silabs/sisdk-2026.12`)
+  (e.g. `/home/mnika/sisdk-release`)
 - Target: `thumbv8m.main-none-eabi` (see `.cargo/config.toml` under this crate)
 - Flash/run: `cargo run --release` (probe-rs + `EFR32MG24B220F1536IM48`)
 - Source of truth for LL/HCI: `~/silabs/bluetooth-le` (not binaries)
@@ -137,7 +147,7 @@ Called from `ble_runtime::init_stack()` via `embassy_silabs::ble::init_step(1..=
 | 1 | `sl_memory_init()` |
 | 2 | DCDC |
 | 3 | HFXO (39 MHz) |
-| 4 | Clocks |
+| 4 | Clocks — SYSCLK→HFXO; **EM01GRPCCLK stays HFRCODPLL** (display SPI) |
 | 5 | EMU |
 | 6 | Sleeptimer |
 | 7 | `sli_bt_stack_permanent_allocation()` |
@@ -188,11 +198,11 @@ Before each `ubt_run`, call `sli_app_timer_step()`. Keeps host app timers aligne
 Embassy’s manual stepping. (Sleeptimer advances via `SYSRTC_APP` IRQ; no explicit step
 function is called from the pump.)
 
-### `--wrap=hci_le_set_extended_advertising_enable` / `_parameters` (`silabs_ble_hci_usch.c`) — **critical v56/v63**
+### `--wrap=hci_le_set_extended_advertising_*` (`silabs_ble_hci_usch.c`) — **critical v56+**
 
 Prebuilt `libble_host.a` (LTO) **skips `ll_hciCall`** between `hci_command_init_shared` and
-`hci_command_shared_response`. The wraps re-drive controller HCI so enable and parameters
-reach the LL.
+`hci_command_shared_response`. The wraps re-drive controller HCI so enable, parameters, and
+**advertising data** (4-arg `hci_le_set_extended_advertising_data`) reach the LL.
 
 Strong `ll_hciCall` in [`silabs_ll_hci_call.c`](../silabs-csdk/src/silabs_ll_hci_call.c) matches
 controller `ll_hci.c` (`bluetooth_le_controller/src/ll_hci.c`, `ll_hci.call` mailbox).
@@ -213,7 +223,7 @@ cortex-m-rt uses `PendSV` as the vector name on this target (not `PendSV_Handler
 
 ### Deferred start + schedule gate (`silabs_ble_adv_start.c`, `silabs_ble_hci_usch.c`)
 
-Deferred `legacy_advertiser_start` runs with `usch_ScheduleProcess` gated. `pump_loop`
+Deferred `legacy_advertiser_start` runs with `usch_ScheduleProcess` gated. `ble_pump_task`
 then calls `silabs_ble_try_real_schedule_once()` and leaves `schedule_allow_real=1`.
 
 ### Linker flags in `embassy-silabs-bt-empty/build.rs`
@@ -223,6 +233,7 @@ then calls `silabs_ble_try_real_schedule_once()` and leaves `schedule_allow_real
 --wrap=ubt_run
 --wrap=hci_le_set_extended_advertising_enable
 --wrap=hci_le_set_extended_advertising_parameters
+--wrap=hci_le_set_extended_advertising_data
 --wrap=usch_ScheduleProcess
 --wrap=sl_btctrl_raise_events
 --wrap=bg_message_queue_wait_time
@@ -230,6 +241,9 @@ then calls `silabs_ble_try_real_schedule_once()` and leaves `schedule_allow_real
 ```
 
 Plus `-uMODEM`, `-uMODEM_IRQHandler`, etc. to force-link RAIL radio IRQ handlers.
+
+**Do not** force-link `SYSRTC_APP` / `SYSRTC_APP_IRQHandler` — Embassy `_time-driver`
+provides those. Duplicate symbols broke the time driver (v76).
 
 Do **not** wrap internal `sli_*` symbols or RAIL TX/config APIs for diagnostics.
 
@@ -374,44 +388,99 @@ Do not reintroduce `--wrap=sli_*` or RAIL TX/config wraps for debugging.
 
 ---
 
-## Current status (v70, SDK 2026.12)
+## Memory LCD bring-up (v76)
 
-### Build
+### Goal
+
+Show BLE status on the WSTK **LS013B7DH03** (EUSART1: PC01 MOSI, PC03 CLK, PC08 CS,
+PC09 DISP_ENABLE, PC06 EXTCOMIN). Working reference: `embassy-silabs-project` on the same
+board — no BLE stack, display text + spinner OK.
+
+### What works
+
+| Item | Status |
+|------|--------|
+| `embassy-silabs-project` LCD | OK on BRD4186C/4187C |
+| BLE + LCD build (`ble-empty-lcd-v76`) | OK |
+| Defmt `display spi ref=19000000 Hz` | OK (EM01GRPCCLK on HFRCODPLL) |
+| BLE advertising while LCD code linked | OK |
+
+### What does not work (v76)
+
+| Symptom | Notes |
+|---------|--------|
+| DISP LED off at runtime | PC09 (DISP_ENABLE) not seen high — app may not reach `power_on()` |
+| Silicon Labs logo after reset | Board controller still owns panel |
+| Panel blank/clear during runtime | After v76 clock fix (was static noise before) |
+| Flash erase clears panel | Programmer/board effect; not proof of app SPI |
+
+### Clock fix applied (v76)
+
+`sl_device_init_clocks()` switches SYSCLK (and most buses) to HFXO for BLE/RAIL but
+**must not** move `EM01GRPCCLK` off HFRCODPLL. That mux feeds EUSART1 SPI; at 39 MHz
+the Sharp panel showed static/garbled pixels.
+
+- [`sl_device_init_clocks.c`](../silabs-csdk/src/sl_device_init_clocks.c) — skip
+  `CMU_ClockSelectSet(cmuClock_EM01GRPCCLK, HFXO)`
+- [`memlcd.rs`](../embassy-silabs/src/drivers/display/memlcd.rs) — `SpiConfig.ref_freq_hz`
+- [`em_system_stub.c`](../silabs-csdk/src/em_system_stub.c) — `silabs_em01grpcclk_hz()`
+
+### Open investigation
+
+Primary lead: **Embassy async timers may not fire** after BLE `sl_sleeptimer_init()` /
+SDK `sl_hal_sysrtc` re-touch SYSRTC (same peripheral as Embassy `_time-driver`). Symptom
+fits: `display_task` blocks on its first `Timer::after_millis` before `power_on()`; BLE
+still works because advertising completes inside synchronous `init_stack()`.
+
+A minimal BLE-only sleeptimer shim was prototyped and **reverted** — needs a cleaner
+approach that keeps all application timing on embassy_time.
+
+### Display task flow (`ble_empty.rs`)
+
+1. `init_stack()` (sync)
+2. `MemLcd::new_without_extcomin` + spawn `extcomin_task_owned` @ 60 Hz
+3. `display_task`: 50 ms delay → `power_on()` → `clear_hw()` → draw MAC/adv → `flush_display` @ 500 ms
+
+---
+
+## Current status (v76)
+
+### Build / run
 
 ```bash
 cd embassy-silabs-bt-empty
-export SILABS_SDK=/Users/manika/silabs/sisdk-2026.12
-cargo build --release --bin ble-empty
+export SILABS_SDK=/path/to/sisdk-release
+cargo run --release
 ```
 
-Boot log: `ble empty boot tag=ble-empty-discover-v70`.
+Boot log: `ble empty boot tag=ble-empty-lcd-v76`.
 
 ### Host + RF — works
 
 | Item | Status |
 |------|--------|
-| Init / deferred adv / HCI enable | OK |
-| One-shot real `usch_ScheduleProcess` then `schedule_allow_real` | OK |
+| Init / deferred adv / HCI enable + adv data | OK |
+| Async `ble_pump_task` (5 ms) | OK |
 | RAIL TX path | OK after PHY force-link |
-| nRF Connect sees **"Embassy BLE"** | Confirmed on v68; rechecked on v70 |
+| nRF Connect sees **"Embassy BLE"** | OK |
 | Connect / GATT | Not started |
 
-### RAIL PHY force-link (the RF root cause)
+### Memory LCD — not working
 
-`librail_efr32xg24_*.a` exports **weak NULL** stubs for `RAIL_BLE_Phy1MbpsViterbi` (etc.).
-With typical archive order those NULLs win, so `sl_rail_ble_config_phy_1_mbps` never loads
-a channel config → `blePhy` undefined → `sl_rail_ble_config_channel_radio_params` returns
-`0x2` (`INVALID_STATE`) → `sl_rail_start_tx` returns `0xE` (`INVALID_CALL`).
+See [Memory LCD bring-up (v76)](#memory-lcd-bring-up-v76).
 
-Fix: [`silabs_rail_ble_phy_force.c`](../silabs-csdk/src/silabs_rail_ble_phy_force.c)
-strongly defines the PHY pointers to 39 MHz configs; `embassy-silabs-bt-empty/build.rs`
-passes `-usilabs_force_rail_ble_phys`.
+### RAIL PHY force-link
+
+`librail_efr32xg24_*.a` exports weak NULL `RAIL_BLE_Phy*` stubs. Fix:
+[`silabs_rail_ble_phy_force.c`](../silabs-csdk/src/silabs_rail_ble_phy_force.c) +
+`-usilabs_force_rail_ble_phys`.
 
 ### Next
 
-Connect / GATT bring-up (not started).
+1. Fix display ownership / Embassy timer interaction (without breaking BLE)
+2. Connect / GATT (not started)
 
-See [`ble-investigation-handoff.md`](../ble-investigation-handoff.md) for full timeline.
+See [`ble-investigation-handoff.md`](../ble-investigation-handoff.md) for RF timeline.
 
 ---
 
@@ -430,6 +499,8 @@ See [`ble-investigation-handoff.md`](../ble-investigation-handoff.md) for full t
 | v68 | Force-link strong `RAIL_BLE_Phy*` — **nRF Connect sees "Embassy BLE"** |
 | v69 | Disable tracing logs |
 | v70 | Remove BLE/RAIL diag wraps and all `sli_*` wraps — **adv still OK** |
+| v71–v75 | Async BLE pump; blocking `delay.rs` removed; LCD task added |
+| v76 | EM01GRPCCLK/HFRCODPLL display SPI fix; adv-data HCI wrap; SYSRTC_APP linker fix; **LCD still broken** |
 
 ---
 
@@ -445,10 +516,9 @@ RAIL source of truth: `~/silabs/rail`. Do **not** disassemble prebuilt archives 
 
 ```bash
 cd embassy-silabs-bt-empty
-export SILABS_SDK=/Users/manika/silabs/sisdk-2026.12
-cargo build --release --bin ble-empty
+export SILABS_SDK=/path/to/sisdk-release
 cargo run --release
 ```
 
-Build tag at boot: `ble empty boot tag=ble-empty-discover-v70`.
+Build tag at boot: `ble empty boot tag=ble-empty-lcd-v76`.
 

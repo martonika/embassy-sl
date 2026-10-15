@@ -18,7 +18,7 @@ Embassy HAL for Silabs chips. Provides `embassy-silabs::init()`, peripheral driv
 |---------|---------|
 | `xg24` / `board-brd4186c` | EFR32MG24 + BRD4186C defaults |
 | `defmt` | Structured logging via RTT |
-| `memlcd-driver` | Memory LCD (e.g. on Thunderboard-style boards) |
+| `memlcd-driver` | Memory LCD (e.g. on WSTK) |
 | `rail` | Proprietary RAIL radio (`silabs-rail-sys` + `silabs-csdk`) |
 | `ble` | Bluetooth LE host/controller (`silabs-bluetooth-sys` + RAIL-BLE) |
 | `btmesh` | Bluetooth Mesh provisionee (`silabs-btmesh-sys`, requires `ble`) |

@@ -1,10 +1,10 @@
-//! Board support for BRD4186C - xG24 Dev Kit (EFR32MG24B210F1536IM48)
+//! Board support for BRD4186C / BRD4187C - xG24 Dev Kit (B210 or B220 variants)
 //!
 //! This board includes:
 //! - 2 LEDs (active high)
 //! - 2 push buttons
 //! - Si7021 temperature/humidity sensor on I2C1
-//! - LS013B7DH03 Sharp Memory LCD on USART0 SPI
+//! - LS013B7DH03 Sharp Memory LCD on EUSART1 SPI (PC01/PC03)
 //! - MX25R8035F SPI flash
 //! - VCOM (Virtual COM port) via debug USB
 //!
@@ -18,8 +18,10 @@
 //! | BTN1           | PB03 | Active low with pull-up  |
 //! | I2C1 SCL       | PC05 | Sensor I2C               |
 //! | I2C1 SDA       | PC07 | Sensor I2C               |
-//! | Display MOSI   | PC01 | USART0 TX                |
-//! | Display CLK    | PC03 | USART0 CLK               |
+//! | Display MOSI   | PC01 | EUSART1 TX               |
+//! | Display CLK    | PC03 | EUSART1 CLK              |
+//! | Display EXTCOMIN | PC06 | COM inversion          |
+//! | VCOM / BC enable | PB00 | WSTK board controller enable |
 //! | Display CS     | PC08 | GPIO                     |
 //! | Display Enable | PC09 | GPIO, enables display    |
 //! | VCOM Enable    | PB00 | GPIO, enables VCOM       |
@@ -61,10 +63,10 @@ pub struct Board {
     /// I2C1 SDA for sensors
     pub sensor_sda: Peri<'static, PC_07>,
 
-    // Display SPI (USART0)
-    /// Display SPI MOSI (USART0 TX)
+    // Display SPI (EUSART1)
+    /// Display SPI MOSI (EUSART1 TX)
     pub display_mosi: Peri<'static, PC_01>,
-    /// Display SPI CLK (USART0 CLK)
+    /// Display SPI CLK (EUSART1 CLK)
     pub display_clk: Peri<'static, PC_03>,
     /// Display SPI CS (GPIO)
     pub display_cs: Peri<'static, PC_08>,
@@ -74,7 +76,7 @@ pub struct Board {
     // Enable pins
     /// Display power enable
     pub display_enable: Peri<'static, PC_09>,
-    /// VCOM (Virtual COM port) enable
+    /// WSTK board-controller / VCOM enable (PB00, must be high on mainboard kits)
     pub vcom_enable: Peri<'static, PB_00>,
     /// RHT (Relative Humidity & Temperature) sensor enable
     pub sensor_enable: Peri<'static, PD_03>,

@@ -377,6 +377,37 @@ impl Cmu {
         pac::CMU.clken1().modify(|w| w.set_eusart1(true));
     }
 
+    /// Route EM01GRPCCLK to HFRCODPLL (EUSART1 display SPI on xG24 dev kits).
+    ///
+    /// `embassy-silabs-project` never runs the BLE SDK clock init, so the LCD
+    /// runs on the reset-default HFRCODPLL mux. After `sl_device_init_clocks()`
+    /// EM01GRPCCLK is switched to HFXO, which breaks the memlcd SPI timing.
+    pub fn use_hfrcodpll_for_em01grpcclk() {
+        use pac::cmu::vals::Em01grpcclkctrlClksel;
+
+        pac::CMU.clken0().modify(|w| {
+            w.set_hfrco0(true);
+            w.set_dpll0(true);
+        });
+        pac::CMU.em01grpcclkctrl().write(|w| {
+            w.set_clksel(Em01grpcclkctrlClksel::HFRCODPLL);
+        });
+    }
+
+    /// Approximate EM01GRPCCLK frequency in Hz (EUSART SPI clock root on xG24).
+    pub fn em01grpcclk_hz() -> u32 {
+        use pac::cmu::vals::Em01grpcclkctrlClksel;
+
+        match pac::CMU.em01grpcclkctrl().read().clksel() {
+            Em01grpcclkctrlClksel::HFXO | Em01grpcclkctrlClksel::HFXORT => 39_000_000,
+            Em01grpcclkctrlClksel::FSRCO => 20_000_000,
+            Em01grpcclkctrlClksel::HFRCOEM23 => 19_000_000,
+            // Reset default before sl_device_init_dpll; matches em_system_stub.
+            Em01grpcclkctrlClksel::HFRCODPLL | Em01grpcclkctrlClksel::HFRCODPLLRT => 19_000_000,
+            _ => 19_000_000,
+        }
+    }
+
     /// Enable the LDMA clock.
     pub fn enable_ldma() {
         pac::CMU.clken0().modify(|w| w.set_ldma(true));

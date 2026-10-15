@@ -17,7 +17,7 @@ fn main() {
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 
     if env::var("CARGO_FEATURE_BLE_EMPTY").is_ok() {
-        println!("cargo:rustc-env=BLE_EMPTY_BUILD_TAG=ble-empty-discover-v70");
+        println!("cargo:rustc-env=BLE_EMPTY_BUILD_TAG=ble-empty-lcd-v76");
         // Pull strong RAIL_BLE_Phy* from silabs_rail_ble_phy_force.c (overrides
         // librail weak NULL stubs). rust-lld wants -uSYM not -Wl,-u,SYM.
         println!("cargo:rustc-link-arg-bins=-usilabs_force_rail_ble_phys");
@@ -25,6 +25,7 @@ fn main() {
         println!("cargo:rustc-link-arg-bins=--wrap=ubt_run");
         println!("cargo:rustc-link-arg-bins=--wrap=hci_le_set_extended_advertising_enable");
         println!("cargo:rustc-link-arg-bins=--wrap=hci_le_set_extended_advertising_parameters");
+        println!("cargo:rustc-link-arg-bins=--wrap=hci_le_set_extended_advertising_data");
         println!("cargo:rustc-link-arg-bins=--wrap=usch_ScheduleProcess");
         println!("cargo:rustc-link-arg-bins=--wrap=sl_btctrl_raise_events");
         println!("cargo:rustc-link-arg-bins=--wrap=bg_message_queue_wait_time");
@@ -44,7 +45,7 @@ fn main() {
             "RFECA0",
             "RFECA1",
             "SYSRTC_SEQ",
-            "SYSRTC_APP",
+            // SYSRTC_APP is provided by embassy-silabs time driver (_time-driver).
             "AGC_IRQHandler",
             "BUFC_IRQHandler",
             "EMUDG_IRQHandler",
@@ -59,7 +60,6 @@ fn main() {
             "RFECA0_IRQHandler",
             "RFECA1_IRQHandler",
             "SYSRTC_SEQ_IRQHandler",
-            "SYSRTC_APP_IRQHandler",
         ] {
             println!("cargo:rustc-link-arg-bins=-u{sym}");
         }

@@ -1,30 +1,35 @@
 # embassy-silabs-bt-empty
 
-BLE-only bring-up project for BRD4186C (EFR32MG24) using Embassy + Silicon Labs stack libraries.
+BLE + memory-LCD bring-up on **BRD4186C / BRD4187C** (EFR32MG24) using Embassy and
+Silicon Labs SDK stack libraries.
 
-## Status
+## Status (build tag `ble-empty-lcd-v76`)
 
-This project is **work in progress** and **does not work currently**.
+| Area | Status |
+|------|--------|
+| **Build** | OK (`cargo build --release`) |
+| **BLE advertising** | OK — nRF Connect sees **"Embassy BLE"** |
+| **Memory LCD** | **Not working** — see [BLE_BRINGUP.md](BLE_BRINGUP.md#memory-lcd-bring-up-v76) |
 
-- It builds successfully (`tag=ble-empty-sdk-pump-v2`).
-- Runtime uses SDK-style `sl_bt_run()` + `sl_bt_priority_handle()` with Rust-owned `sl_bt_on_event`.
-- Connectable advertising is still under investigation.
-
-## Purpose
-
-This crate exists as a clean BLE-focused baseline separated from mesh experiments.
-
-Current direction:
-- Keep minimal C runtime glue for stack startup/pumping.
-- Move BLE application logic (event handling + advertising flow) into Rust via FFI.
+Runtime uses an async Embassy task pump (`ble::step()` every 5 ms), Rust `sl_bt_on_event`,
+and a separate display task for the WSTK LS013B7DH03 panel.
 
 ## Run
 
 ```bash
+export SILABS_SDK=/path/to/sisdk-release   # required
+cd embassy-silabs-bt-empty
 cargo run --release
 ```
 
+Boot log should include `ble empty boot tag=ble-empty-lcd-v76` and
+`display spi ref=19000000 Hz` (HFRCODPLL, not 39 MHz).
+
+## Docs
+
+- [BLE_BRINGUP.md](BLE_BRINGUP.md) — full BLE glue history, architecture, LCD investigation
+
 ## Notes
 
-- Default target/chip settings are in `.cargo/config.toml`.
-- The build links against Silicon Labs SDK libraries and expects `SILABS_SDK` to be available.
+- Target/chip: `thumbv8m.main-none-eabi` / `EFR32MG24B220F1536IM48` (`.cargo/config.toml`)
+- Reference LCD app on the same board: `embassy-silabs-project`

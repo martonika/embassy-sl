@@ -114,6 +114,8 @@ pub struct Config {
     /// Reverse bits in each byte before transmission.
     /// Some memory LCDs require LSB-first bit order within each byte.
     pub reverse_bits: bool,
+    /// EUSART SPI root clock for SDIV. When `None`, uses [`Cmu::em01grpcclk_hz`].
+    pub ref_freq_hz: Option<u32>,
 }
 
 impl Default for Config {
@@ -123,6 +125,7 @@ impl Default for Config {
             clock_mode: ClockMode::Mode0,
             msb_first: true,
             reverse_bits: false,
+            ref_freq_hz: None,
         }
     }
 }
@@ -195,7 +198,9 @@ impl<'d, T: Instance> MemLcdSpi<'d, T> {
         // In sync mode, SDIV in CFG2 controls the clock divider
         // bitrate = refFreq / (SDIV + 1)
         // So SDIV = (refFreq / bitrate) - 1
-        let ref_freq = 20_000_000u32; // Assume 20 MHz for now (TODO: get from CMU)
+        // EUSART sync SPI is clocked from EM01GRPCCLK.
+        crate::cmu::Cmu::enable_eusart1();
+        let ref_freq = config.ref_freq_hz.unwrap_or_else(crate::cmu::Cmu::em01grpcclk_hz);
         let sdiv = (ref_freq / config.bitrate).saturating_sub(1);
         let sdiv = sdiv.min(255) as u8; // SDIV is 8-bit
 

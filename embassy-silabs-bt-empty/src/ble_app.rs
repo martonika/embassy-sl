@@ -7,8 +7,6 @@ use silabs_bluetooth_sys::{
     sl_bt_gap_get_identity_address, sl_bt_legacy_advertiser_generate_data, sl_bt_msg_t,
 };
 
-const SL_BT_LEGACY_ADVERTISER_CONNECTABLE: u8 = 0x2;
-
 static mut ADV_SET_HANDLE: u8 = 0xff;
 static mut PENDING_ADV_START: u8 = 0;
 const SL_STATUS_OK: u32 = 0;

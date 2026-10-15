@@ -12,7 +12,8 @@ sl_status_t sl_device_init_clocks(void)
   CMU_ClockSelectSet(cmuClock_EM01GRPBCLK, cmuSelect_HFXO);
 #endif
 #if defined(_CMU_EM01GRPCCLKCTRL_MASK)
-  CMU_ClockSelectSet(cmuClock_EM01GRPCCLK, cmuSelect_HFXO);
+  /* Leave EM01GRPCCLK on HFRCODPLL (reset default). EUSART1 drives the WSTK
+   * memory LCD; switching this mux to HFXO garbles SPI and shows as static. */
 #endif
   CMU_ClockSelectSet(cmuClock_EM23GRPACLK, cmuSelect_LFRCO);
   CMU_ClockSelectSet(cmuClock_EM4GRPACLK, cmuSelect_LFRCO);

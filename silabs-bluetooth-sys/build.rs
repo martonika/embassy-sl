@@ -10,10 +10,14 @@ fn sdk_path() -> PathBuf {
 }
 
 fn link_lib(search: &Path, name: &str) {
+    link_lib_optional(search, name, true);
+}
+
+fn link_lib_optional(search: &Path, name: &str, required: bool) {
     if search.join(format!("lib{name}.a")).exists() {
         println!("cargo:rustc-link-search=native={}", search.display());
         println!("cargo:rustc-link-lib=static={name}");
-    } else {
+    } else if required {
         println!("cargo:warning=BLE library lib{name}.a not found in {}", search.display());
     }
 }
@@ -176,7 +180,8 @@ fn link_ble_libraries(sdk: &Path, out_dir: &Path, psa_crypto: bool) {
         ),
     ];
     for (subdir, lib) in bgapi_libs {
-        link_lib(&bgapi.join(subdir), lib);
+        let required = lib != "bgapi_task";
+        link_lib_optional(&bgapi.join(subdir), lib, required);
     }
 }
 

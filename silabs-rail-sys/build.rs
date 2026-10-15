@@ -22,7 +22,6 @@ fn link_rail_blob(sdk: &Path, multiprotocol: bool) {
         println!("cargo:rustc-link-search=native={}", blob_dir.display());
         let lib = blob_name.trim_start_matches("lib").trim_end_matches(".a");
         println!("cargo:rustc-link-lib=static={lib}");
-        println!("cargo:warning=Linking RAIL blob: {}", blob_path.display());
     } else {
         println!(
             "cargo:warning=RAIL blob not found at {}. Set SILABS_SDK to your Simplicity SDK install.",
@@ -170,10 +169,7 @@ fn main() {
             .write_to_file(out_path.join("bindings.rs"))
             .expect("Couldn't write bindings");
 
-        println!(
-            "cargo:warning=Generated RAIL bindings from {}",
-            header_path.display()
-        );
+        println!("cargo:rerun-if-changed={}", header_path.display());
     } else {
         std::fs::write(
             out_path.join("bindings.rs"),

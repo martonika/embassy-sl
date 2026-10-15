@@ -18,10 +18,17 @@ extern hci_event_t *hci_command_shared_response(void);
 extern void ll_hciCall(void (*cmd)(void));
 extern void ll_hciCmdSetExtendedAdvertisingEnable(void);
 extern void ll_hciCmdSetExtendedAdvertisingParameters(void);
+extern void ll_hciCmdSetExtendedAdvertisingData(void);
+extern void ll_hciCmdSetExtendedScanResponseData(void);
 extern void __real_usch_ScheduleProcess(void);
 
 #define HCI_Le_Set_Extended_Advertising_Parameters 0x2036u
+#define HCI_Le_Set_Extended_Advertising_Data 0x2037u
+#define HCI_Le_Set_Extended_Scan_Response_Data 0x2038u
 #define HCI_Le_Set_Extended_Advertising_Enable 0x2039u
+#define HCI_EXT_ADV_DATA_MAX 251u
+#define HCI_EXT_ADV_DATA_OPERATION_COMPLETE 0x03u
+#define HCI_EXT_ADV_FRAGMENT_PREFERENCE_DEFAULT 0x00u
 #define HCI_ERROR(X) ((X) ? ((sl_status_t)(X) | SL_STATUS_BLUETOOTH_CTRL_SPACE) : SL_STATUS_OK)
 
 typedef struct {
@@ -162,6 +169,73 @@ sl_status_t __wrap_hci_le_set_extended_advertising_parameters(
     const uint8_t *evt = (const uint8_t *)hci_command_shared_response();
     return HCI_ERROR(evt[5]);
   }
+}
+
+/* gap_adv.c: handle, scan_rsp (0=adv / 1=scan rsp), len, data */
+static sl_status_t hci_ext_adv_variable_data(uint16_t opcode,
+                                             void (*handler)(void),
+                                             uint8_t handle,
+                                             uint8_t operation,
+                                             uint8_t fragment_preference,
+                                             uint8_t data_length,
+                                             uint8_t *data)
+{
+  typedef struct __attribute__((packed)) {
+    uint16_t opcode;
+    uint8_t param_len;
+    uint8_t handle;
+    uint8_t operation;
+    uint8_t fragment_preference;
+    uint8_t data_length;
+    uint8_t data[HCI_EXT_ADV_DATA_MAX];
+  } silabs_hci_ext_adv_data_cmd_t;
+
+  silabs_hci_ext_adv_data_cmd_t *cmd;
+
+  if (data_length > HCI_EXT_ADV_DATA_MAX) {
+    return SL_STATUS_INVALID_PARAMETER;
+  }
+
+  cmd = (silabs_hci_ext_adv_data_cmd_t *)hci_command_init_shared(
+    opcode,
+    (uint8_t)(4u + data_length));
+  cmd->handle = handle;
+  cmd->operation = operation;
+  cmd->fragment_preference = fragment_preference;
+  cmd->data_length = data_length;
+  if (data_length > 0u && data != NULL) {
+    memcpy(cmd->data, data, data_length);
+  }
+
+  ll_hciCall(handler);
+  {
+    const uint8_t *evt = (const uint8_t *)hci_command_shared_response();
+    return HCI_ERROR(evt[5]);
+  }
+}
+
+sl_status_t __wrap_hci_le_set_extended_advertising_data(uint8_t handle,
+                                                        uint8_t scan_rsp,
+                                                        uint8_t advertising_data_length,
+                                                        uint8_t *advertising_data)
+{
+  if (scan_rsp != 0u) {
+    return hci_ext_adv_variable_data(HCI_Le_Set_Extended_Scan_Response_Data,
+                                     ll_hciCmdSetExtendedScanResponseData,
+                                     handle,
+                                     HCI_EXT_ADV_DATA_OPERATION_COMPLETE,
+                                     HCI_EXT_ADV_FRAGMENT_PREFERENCE_DEFAULT,
+                                     advertising_data_length,
+                                     advertising_data);
+  }
+
+  return hci_ext_adv_variable_data(HCI_Le_Set_Extended_Advertising_Data,
+                                   ll_hciCmdSetExtendedAdvertisingData,
+                                   handle,
+                                   HCI_EXT_ADV_DATA_OPERATION_COMPLETE,
+                                   HCI_EXT_ADV_FRAGMENT_PREFERENCE_DEFAULT,
+                                   advertising_data_length,
+                                   advertising_data);
 }
 
 void __wrap_usch_ScheduleProcess(void)

@@ -1,12 +1,22 @@
 # BLE Advertising Investigation Handoff (BRD4186C / EFR32MG24)
 
-**Resumed:** 2026-09-02 · build tag `ble-empty-discover-v61` · SDK `sisdk-2026.12`
+**Updated:** 2026-10-15 · build tag `ble-empty-lcd-v76` · SDK `sisdk-release`
 
 ## Goal
 
 Bring up connectable BLE advertising (`"Embassy BLE"`) discoverable in nRF Connect.
 
-## Current status (v61)
+## Current status (v76) — advertising **works**
+
+RF/advertising bring-up is **complete** (v68 PHY force-link, v70 cleanup, v76 HCI adv-data
+wrap). nRF Connect sees **"Embassy BLE"**.
+
+**Active work** moved to memory LCD on the same board — **not working** on v76. See
+[`embassy-silabs-bt-empty/BLE_BRINGUP.md`](embassy-silabs-bt-empty/BLE_BRINGUP.md#memory-lcd-bring-up-v76).
+
+---
+
+## Historical status (v61) — superseded
 
 ### Build on SDK 2026.12 — fixed
 

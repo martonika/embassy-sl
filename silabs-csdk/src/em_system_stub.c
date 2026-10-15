@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include "em_cmu.h"
 #include "em_device.h"
 
 #ifndef HFXO_FREQ
@@ -91,7 +92,9 @@ uint32_t SystemULFRCOClockGet(void)
 
 uint64_t sl_hal_system_get_unique(void)
 {
-    return 0x0123456789ABCDEFULL;
+    uint32_t lo = DEVINFO->EUI64L;
+    uint32_t hi = DEVINFO->EUI64H;
+    return ((uint64_t)hi << 32) | (uint64_t)lo;
 }
 
 typedef struct {
@@ -105,4 +108,9 @@ void sl_hal_system_get_chip_revision(sl_hal_system_chip_revision_t *rev)
         rev->major = 1;
         rev->minor = 0;
     }
+}
+
+uint32_t silabs_em01grpcclk_hz(void)
+{
+    return CMU_ClockFreqGet(cmuClock_EM01GRPCCLK);
 }

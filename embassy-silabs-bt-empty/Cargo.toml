@@ -18,7 +18,13 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features
     "platform-cortex-m",
     "executor-thread",
 ] }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+] }
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+embedded-graphics = "0.8"
+heapless = "0.9.3"
 silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = [
     "rt",
     "critical-section",
@@ -30,6 +36,8 @@ embassy-silabs = { version = "0.1.0", path = "../embassy-silabs", default-featur
     "rt",
     "xg24",
     "_ns",
+    "_time-driver",
+    "memlcd-driver",
 ] }
 silabs-rail-sys = { path = "../silabs-rail-sys", optional = true, default-features = false, features = [
     "rail",
