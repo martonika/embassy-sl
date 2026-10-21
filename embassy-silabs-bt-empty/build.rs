@@ -17,7 +17,6 @@ fn main() {
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 
     if env::var("CARGO_FEATURE_BLE_EMPTY").is_ok() {
-        println!("cargo:rustc-env=BLE_EMPTY_BUILD_TAG=ble-empty-lcd-v76");
         // Pull strong RAIL_BLE_Phy* from silabs_rail_ble_phy_force.c (overrides
         // librail weak NULL stubs). rust-lld wants -uSYM not -Wl,-u,SYM.
         println!("cargo:rustc-link-arg-bins=-usilabs_force_rail_ble_phys");

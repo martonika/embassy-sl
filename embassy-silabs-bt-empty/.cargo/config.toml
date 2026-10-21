@@ -1,7 +1,10 @@
 [target.thumbv8m.main-none-eabi]
 runner = [
     "probe-rs", "run",
-    "--chip", "EFR32MG24B220F1536IM48",
+    # BRD4186C (default): EFR32MG24B210 (+10 dBm)
+    "--chip", "EFR32MG24B210F1536IM48",
+    # BRD4187C (+20 dBm): swap chip line above for:
+    # "--chip", "EFR32MG24B220F1536IM48",
     "--chip-description-path", "target-desc/EFR32MG24_Series.yaml",
 ]
 

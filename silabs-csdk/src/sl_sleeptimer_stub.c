@@ -359,3 +359,205 @@ uint16_t sl_sleeptimer_get_clock_accuracy(void)
 {
     return 500;
 }
+
+sl_status_t sl_sleeptimer_is_timer_running(const sl_sleeptimer_timer_handle_t *handle,
+                                           bool *running)
+{
+    CORE_DECLARE_IRQ_STATE;
+    sl_sleeptimer_timer_handle_t *current;
+
+    if (handle == NULL || running == NULL) {
+        return SL_STATUS_NULL_POINTER;
+    }
+
+    *running = false;
+    CORE_ENTER_ATOMIC();
+    current = timer_head;
+    while (current != NULL && !*running) {
+        if (current == handle) {
+            *running = true;
+        } else {
+            current = current->next;
+        }
+    }
+    CORE_EXIT_ATOMIC();
+
+    return SL_STATUS_OK;
+}
+
+sl_status_t sl_sleeptimer_get_timer_time_remaining(const sl_sleeptimer_timer_handle_t *handle,
+                                                   uint32_t *time)
+{
+    if (handle == NULL || time == NULL) {
+        return SL_STATUS_NULL_POINTER;
+    }
+
+    CORE_DECLARE_IRQ_STATE;
+    CORE_ENTER_ATOMIC();
+    update_delta_list();
+    *time = handle->delta;
+    CORE_EXIT_ATOMIC();
+
+    return SL_STATUS_OK;
+}
+
+sl_status_t sl_sleeptimer_get_remaining_time_of_first_timer(uint16_t option_flags,
+                                                            uint32_t *time)
+{
+    if (time == NULL) {
+        return SL_STATUS_NULL_POINTER;
+    }
+
+    CORE_DECLARE_IRQ_STATE;
+    CORE_ENTER_ATOMIC();
+    update_delta_list();
+    if (timer_head == NULL) {
+        CORE_EXIT_ATOMIC();
+        return SL_STATUS_NOT_FOUND;
+    }
+    *time = timer_head->delta;
+    CORE_EXIT_ATOMIC();
+    (void)option_flags;
+    return SL_STATUS_OK;
+}
+
+sl_status_t sl_sleeptimer_start_periodic_timer(sl_sleeptimer_timer_handle_t *handle,
+                                               uint32_t timeout,
+                                               sl_sleeptimer_timer_callback_t callback,
+                                               void *callback_data,
+                                               uint8_t priority,
+                                               uint16_t option_flags)
+{
+    bool is_running = false;
+
+    if (handle == NULL) {
+        return SL_STATUS_NULL_POINTER;
+    }
+
+    handle->conversion_error = 0;
+    handle->accumulated_error = 0;
+    sl_sleeptimer_is_timer_running(handle, &is_running);
+    if (is_running) {
+        return SL_STATUS_INVALID_STATE;
+    }
+
+    return create_timer(handle,
+                        timeout,
+                        timeout,
+                        callback,
+                        callback_data,
+                        priority,
+                        option_flags);
+}
+
+sl_status_t sl_sleeptimer_start_periodic_timer_ms(sl_sleeptimer_timer_handle_t *handle,
+                                                    uint32_t timeout_ms,
+                                                    sl_sleeptimer_timer_callback_t callback,
+                                                    void *callback_data,
+                                                    uint8_t priority,
+                                                    uint16_t option_flags)
+{
+    uint32_t timeout_tick;
+    sl_status_t status = sl_sleeptimer_ms32_to_tick(timeout_ms, &timeout_tick);
+    if (status != SL_STATUS_OK) {
+        return status;
+    }
+    return sl_sleeptimer_start_periodic_timer(handle,
+                                              timeout_tick,
+                                              callback,
+                                              callback_data,
+                                              priority,
+                                              option_flags);
+}
+
+sl_status_t sl_sleeptimer_restart_periodic_timer(sl_sleeptimer_timer_handle_t *handle,
+                                               uint32_t timeout,
+                                               sl_sleeptimer_timer_callback_t callback,
+                                               void *callback_data,
+                                               uint8_t priority,
+                                               uint16_t option_flags)
+{
+    if (handle == NULL) {
+        return SL_STATUS_NULL_POINTER;
+    }
+
+    handle->conversion_error = 0;
+    handle->accumulated_error = 0;
+    (void)sl_sleeptimer_stop_timer(handle);
+
+    return create_timer(handle,
+                        timeout,
+                        timeout,
+                        callback,
+                        callback_data,
+                        priority,
+                        option_flags);
+}
+
+sl_status_t sl_sleeptimer_restart_periodic_timer_ms(sl_sleeptimer_timer_handle_t *handle,
+                                                    uint32_t timeout_ms,
+                                                    sl_sleeptimer_timer_callback_t callback,
+                                                    void *callback_data,
+                                                    uint8_t priority,
+                                                    uint16_t option_flags)
+{
+    uint32_t timeout_tick;
+    sl_status_t status = sl_sleeptimer_ms32_to_tick(timeout_ms, &timeout_tick);
+    if (status != SL_STATUS_OK) {
+        return status;
+    }
+    return sl_sleeptimer_restart_periodic_timer(handle,
+                                                timeout_tick,
+                                                callback,
+                                                callback_data,
+                                                priority,
+                                                option_flags);
+}
+
+static void delay_callback(sl_sleeptimer_timer_handle_t *handle, void *data)
+{
+    *(volatile bool *)data = false;
+    (void)handle;
+}
+
+void sl_sleeptimer_delay_millisecond(uint16_t time_ms)
+{
+    volatile bool wait = true;
+    sl_sleeptimer_timer_handle_t delay_timer;
+    uint32_t delay;
+    sl_status_t status;
+
+    status = sl_sleeptimer_ms32_to_tick(time_ms, &delay);
+    if (status != SL_STATUS_OK) {
+        return;
+    }
+
+    status = sl_sleeptimer_start_timer(&delay_timer,
+                                       delay,
+                                       delay_callback,
+                                       (void *)&wait,
+                                       0,
+                                       0);
+    if (status != SL_STATUS_OK) {
+        return;
+    }
+
+    while (wait) {
+        silabs_sleeptimer_step();
+    }
+}
+
+uint32_t sl_sleeptimer_ms_to_tick(uint16_t time_ms)
+{
+    return (uint32_t)((((uint64_t)time_ms * SLEEPTIMER_HZ) + 999U) / 1000U);
+}
+
+uint32_t sl_sleeptimer_get_max_ms32_conversion(void)
+{
+    return (uint32_t)((((uint64_t)UINT32_MAX * 1000U) / SLEEPTIMER_HZ) - 1U);
+}
+
+bool sl_sleeptimer_is_power_manager_early_restore_timer_latest_to_expire(void)
+{
+    return false;
+}

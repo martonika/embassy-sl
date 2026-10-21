@@ -3,7 +3,11 @@
 
 #define SL_RAIL_UTIL_SEQUENCER_RUNTIME_IMAGE_SELECTION 0
 
-/* EFR32MG24B220 = +20 dBm PA (B210 would use PA_10_DBM). */
+/* Match the silicon part: B210 = +10 dBm, B220 = +20 dBm (set via SILABS_MG24_B210). */
+#if defined(SILABS_MG24_B210)
+#define SL_RAIL_UTIL_SEQUENCER_IMAGE RAIL_SEQ_IMAGE_PA_10_DBM
+#else
 #define SL_RAIL_UTIL_SEQUENCER_IMAGE RAIL_SEQ_IMAGE_PA_20_DBM
+#endif
 
 #endif

@@ -6,7 +6,8 @@ mod bindings {
         non_camel_case_types,
         non_snake_case,
         unused,
-        unsafe_op_in_unsafe_fn
+        unsafe_op_in_unsafe_fn,
+        clippy::all
     )]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }

@@ -1,16 +1,19 @@
 #![no_std]
 #![no_main]
 
+#[cfg(all(feature = "board-brd4186c", feature = "board-brd4187c"))]
+compile_error!("enable only one of `board-brd4186c` or `board-brd4187c`");
+#[cfg(not(any(feature = "board-brd4186c", feature = "board-brd4187c")))]
+compile_error!("enable `board-brd4186c` or `board-brd4187c`");
+
 #[path = "../ble_app.rs"]
 mod ble_app;
 #[path = "../ble_runtime.rs"]
 mod ble_runtime;
 
-use core::sync::atomic::Ordering;
-
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_silabs::boards::brd4186c::Board;
+use embassy_silabs::boards::{Board, BOARD_NAME, MG24_PART, RADIO_PA_DBM};
 use embassy_silabs::drivers::display::memlcd::{
     MemLcd, MemLcdConfig, SpiConfig, extcomin_task_owned,
 };
@@ -35,7 +38,8 @@ where
     let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
     let text_style = TextStyleBuilder::new().alignment(Alignment::Center).build();
 
-    Text::with_text_style("Embassy BLE", Point::new(64, 20), style, text_style).draw(display)?;
+    Text::with_text_style(ble_runtime::DEVICE_NAME, Point::new(64, 20), style, text_style)
+        .draw(display)?;
 
     let addr = ble_runtime::read_ble_addr();
     let mut mac: String<20> = String::new();
@@ -49,34 +53,41 @@ where
     .ok();
     Text::with_text_style(&mac, Point::new(64, 40), style, text_style).draw(display)?;
 
-    let adv4 = ble_runtime::ADV_SETUP.load(Ordering::Relaxed);
-    let mut status: String<24> = String::new();
-    core::fmt::write(&mut status, format_args!("adv4={:#010x}", adv4)).ok();
-    Text::with_text_style(&status, Point::new(64, 60), style, text_style).draw(display)?;
-
     Text::with_text_style("advertising", Point::new(64, 85), style, text_style).draw(display)?;
 
     Ok(())
 }
 
+#[embassy_executor::task]
+async fn blink_led(mut led: Output<'static>) {
+    loop {
+        led.toggle();
+        Timer::after_millis(500).await;
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_silabs::init();
-    info!("ble empty boot tag={}", env!("BLE_EMPTY_BUILD_TAG"));
+    info!(
+        "ble empty board={} part={} pa={}dBm",
+        BOARD_NAME,
+        MG24_PART,
+        RADIO_PA_DBM,
+    );
 
     let (board, remaining) = Board::new(p);
+    let led0 = Output::new(board.led0, Level::Low);
+    let _vcom_enable = Output::new(board.vcom_enable, Level::High);
 
     // SDK clock/GPIO setup must finish before EUSART1 display init.
     ble_runtime::init_stack();
+    ble_runtime::log_ble_identity();
 
     let mut spi_config = SpiConfig::default();
     spi_config.bitrate = SPI_FREQ;
     spi_config.reverse_bits = true;
-    //spi_config.ref_freq_hz = Some(ble_runtime::display_spi_ref_hz());
-    //info!("display spi ref={} Hz", spi_config.ref_freq_hz.unwrap());
-
-    // Configure MemLcd with auto EXTCOMIN toggling enabled
-    let lcd_config = MemLcdConfig::default();
+    spi_config.ref_freq_hz = Some(ble_runtime::display_spi_ref_hz());
 
     let display = MemLcd::new_without_extcomin(
         remaining.eusart1,
@@ -85,20 +96,18 @@ async fn main(spawner: Spawner) {
         board.display_cs,
         board.display_enable,
         spi_config,
-        lcd_config,
+        MemLcdConfig::default(),
     );
-
     let disp_extcomin = Output::new(board.display_extcomin, Level::Low);
 
     ble_runtime::spawn_ble_pump(&spawner);
+    spawner.spawn(unwrap!(blink_led(led0)));
     spawner.spawn(unwrap!(extcomin_task_owned(disp_extcomin, 60)));
     spawner.spawn(unwrap!(display_task(display)));
 }
 
 #[embassy_executor::task]
 async fn display_task(mut display: MemLcd<'static, EUSART1>) {
-    info!("display task start");
-
     display.power_on();
     Timer::after_millis(100).await;
     display.clear_hw();

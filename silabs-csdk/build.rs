@@ -14,6 +14,18 @@ fn push_if_exists(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
+fn mg24_b210() -> bool {
+    env::var("CARGO_FEATURE_MG24_B210").is_ok()
+}
+
+fn mg24_part_define() -> &'static str {
+    if mg24_b210() {
+        "EFR32MG24B210F1536IM48"
+    } else {
+        "EFR32MG24B220F1536IM48"
+    }
+}
+
 fn apply_common_cc_flags(build: &mut cc::Build, includes: &[PathBuf]) {
     build
         .compiler(env::var("CC").unwrap_or_else(|_| "arm-none-eabi-gcc".to_string()))
@@ -24,7 +36,7 @@ fn apply_common_cc_flags(build: &mut cc::Build, includes: &[PathBuf]) {
         .flag("-ffunction-sections")
         .flag("-fdata-sections")
         .flag("-fno-strict-aliasing")
-        .define("EFR32MG24B220F1536IM48", None)
+        .define(mg24_part_define(), None)
         .define("HFXO_FREQ", "39000000")
         .define("SL_COMPONENT_CATALOG_PRESENT", None)
         .define("SL_RAIL_LIB_MULTIPROTOCOL_SUPPORT", "0");
@@ -494,6 +506,9 @@ fn main() {
     // Match dev-profile behaviour: optimized SDK glue faults on hardware at -O3.
     build.opt_level(0);
 
+    if mg24_b210() {
+        build.define("SILABS_MG24_B210", None);
+    }
     if ble {
         build.define("SILABS_CSDK_BLE", None);
     }
@@ -553,8 +568,13 @@ fn main() {
         for src in sdk_app_timer_sources(&sdk) {
             build.file(src);
         }
-        for src in sdk_sleeptimer_sources(&sdk) {
-            build.file(src);
+        if ble_rust_handler {
+            // SDK sl_sleeptimer_hal_sysrtc re-inits SYSRTC_APP and breaks embassy_time.
+            build.file(manifest_dir.join("src/sl_sleeptimer_stub.c"));
+        } else {
+            for src in sdk_sleeptimer_sources(&sdk) {
+                build.file(src);
+            }
         }
         if let Some(gatt_db) = out_dir.join("gatt_db.c").exists().then(|| out_dir.join("gatt_db.c")) {
             build.file(gatt_db);

@@ -18,6 +18,7 @@
 #include "sl_rail_util_pti.h"
 #include "sl_rail_util_power_manager_init.h"
 #include "silabs_rf_activity_leds.h"
+#include "silabs_sleeptimer.h"
 
 #if defined(SILABS_CSDK_BTMESH)
 #include "sl_btmesh.h"
@@ -153,6 +154,7 @@ void silabs_ble_step_app_timer(void)
 void silabs_ble_step_sleeptimer(void)
 {
   silabs_ble_step_phase = 3;
+  silabs_sleeptimer_step();
 }
 
 extern uint8_t silabs_ble_post_init_pump_active_read(void);

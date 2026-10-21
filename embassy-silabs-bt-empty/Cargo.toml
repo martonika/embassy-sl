@@ -32,9 +32,7 @@ silabs-pac = { version = "0.1.0", path = "../silabs-pac", features = [
 ] }
 embassy-silabs = { version = "0.1.0", path = "../embassy-silabs", default-features = false, features = [
     "defmt",
-    "board-brd4186c",
     "rt",
-    "xg24",
     "_ns",
     "_time-driver",
     "memlcd-driver",
@@ -48,7 +46,17 @@ silabs-bluetooth-sys = { path = "../silabs-bluetooth-sys", optional = true, defa
 ] }
 
 [features]
-default = ["ble-empty"]
+default = ["ble-empty", "board-brd4186c", "lcd"]
+lcd = []
+## BRD4186C (+10 dBm, EFR32MG24B210) — selects RAIL_SEQ_IMAGE_PA_10_DBM.
+board-brd4186c = [
+    "embassy-silabs/board-brd4186c",
+    "silabs-csdk/mg24-b210",
+    "silabs-bluetooth-sys/mg24-b210",
+    "silabs-rail-sys/mg24-b210",
+]
+## BRD4187C (+20 dBm, EFR32MG24B220) — selects RAIL_SEQ_IMAGE_PA_20_DBM.
+board-brd4187c = ["embassy-silabs/board-brd4187c"]
 ble-empty = [
     "dep:silabs-csdk",
     "dep:silabs-rail-sys",

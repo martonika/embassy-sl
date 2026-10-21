@@ -9,6 +9,14 @@ fn sdk_path() -> PathBuf {
         .expect("SILABS_SDK must be set to the Simplicity SDK root directory")
 }
 
+fn mg24_part_define() -> &'static str {
+    if env::var("CARGO_FEATURE_MG24_B210").is_ok() {
+        "EFR32MG24B210F1536IM48"
+    } else {
+        "EFR32MG24B220F1536IM48"
+    }
+}
+
 fn link_lib(search: &Path, name: &str) {
     link_lib_optional(search, name, true);
 }
@@ -234,7 +242,7 @@ fn main() {
             format!("-I{}", manifest_dir.join("include").display()),
             "-ffreestanding".to_string(),
             "-Wno-everything".to_string(),
-            "-DEFR32MG24B220F1536IM48".to_string(),
+            format!("-D{}", mg24_part_define()),
             "-DSL_COMPONENT_CATALOG_PRESENT".to_string(),
             "-D__GNUC__".to_string(),
         ];

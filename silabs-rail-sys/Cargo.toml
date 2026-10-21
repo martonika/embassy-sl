@@ -14,6 +14,7 @@ bindgen = "0.72.1"
 
 [features]
 default = ["rail"]
+mg24-b210 = []
 ## Link the single-protocol RAIL blob (proprietary PHY / simple TRX).
 rail = []
 ## Link the multiprotocol RAIL blob (required for BLE coexistence).

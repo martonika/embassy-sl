@@ -2,7 +2,7 @@
 
 Embassy on Silicon Labs EFR32 microcontrollers — a Rust HAL, peripheral access crate, and glue for linking against the Simplicity SDK (RAIL, Bluetooth LE, Bluetooth Mesh).
 
-Primary target today: **EFR32MG24** on **BRD4186C** (xG24 Dev Kit). The HAL is structured so additional xG families can be added behind chip features.
+Primary target today: **EFR32MG24** on **BRD4186C** and **BRD4187C** (xG24 Dev Kit). The HAL is structured so additional xG families and boards can be added behind chip and board features.
 
 ## Repository layout
 
@@ -16,7 +16,10 @@ Embassy HAL for Silabs chips. Provides `embassy-silabs::init()`, peripheral driv
 
 | Feature | Enables |
 |---------|---------|
-| `xg24` / `board-brd4186c` | EFR32MG24 + BRD4186C defaults |
+| `xg24` | EFR32MG24 chip family |
+| `board-brd4186c` | BRD4186C (+10 dBm, B210) + matching RAIL PA sequencer |
+| `board-brd4187c` | BRD4187C (+20 dBm, B220) + matching RAIL PA sequencer |
+| `board-brd2601b` | Thunderboard Sense 2 (EFR32MG24B210) |
 | `defmt` | Structured logging via RTT |
 | `memlcd-driver` | Memory LCD (e.g. on WSTK) |
 | `rail` | Proprietary RAIL radio (`silabs-rail-sys` + `silabs-csdk`) |
@@ -35,29 +38,20 @@ To regenerate after SVD or transform changes, see `silabs-pac/README.md`.
 
 These crates link prebuilt libraries from a local Simplicity SDK install. They are **not** vendored in git.
 
-#### `silabs-rail-sys`
+| Crate | Role |
+|-------|------|
+| `silabs-rail-sys` | RAIL FFI and linker setup |
+| `silabs-bluetooth-sys` | BLE host/controller BGAPI and static archives |
+| `silabs-btmesh-sys` | Bluetooth Mesh stack |
+| `silabs-csdk` | C platform init, RAIL/BLE glue, stack config headers |
 
-FFI and linker setup for Silicon Labs RAIL (proprietary and multiprotocol variants). Used for custom PHY experiments and as the radio layer under BLE.
-
-#### `silabs-bluetooth-sys`
-
-FFI to the BLE host stack, link layer, and BGAPI. `build.rs` pulls headers and static archives (`libble_host.a`, `liblinklayer.a`, etc.) from `SILABS_SDK`.
-
-#### `silabs-btmesh-sys`
-
-FFI to the Bluetooth Mesh stack (provisionee node). Depends on BLE + PSA crypto from the SDK.
-
-#### `silabs-csdk`
-
-C sources compiled into the firmware image: clock/power init stubs, RAIL callbacks, BLE platform init, link-layer pump/wrap glue, PendSV integration, and stack configuration headers copied from Simplicity Studio component layouts. Rust code in `embassy-silabs` pulls this in when `rail`, `ble`, or `btmesh` features are enabled.
-
-See `silabs-csdk/README.md` for optional RAIL PHY config (`rail_config.c` / `SILABS_RAIL_CONFIG_DIR`).
+See each crate's `README.md` for details. RAIL PHY config is optional via `silabs-csdk/rail_config/` or `SILABS_RAIL_CONFIG_DIR`.
 
 ### Firmware examples
 
 #### `embassy-silabs-project`
 
-End-to-end HAL demo for BRD4186C: Embassy executor, defmt, memory LCD text/graphics, and Si7021 temperature/humidity over I2C. Use this to verify basic peripherals before touching radio stacks.
+HAL demo for BRD4186C: Embassy executor, defmt, memory LCD, and Si7021 temperature/humidity over I2C.
 
 ```bash
 cd embassy-silabs-project
@@ -66,20 +60,7 @@ cargo run --release
 
 #### `embassy-silabs-bt-empty`
 
-BLE-only bring-up firmware: minimal C runtime glue + Rust `sl_bt_on_event` handler. Targets connectable advertising on BRD4186C using the SDK BLE stack on a bare-metal Embassy pump (no RTOS).
-
-**Status: work in progress** — builds and completes stack init, but RF advertising is not yet visible on air (see docs below).
-
-```bash
-export SILABS_SDK=/path/to/simplicity-sdk
-cd embassy-silabs-bt-empty
-cargo run --release
-```
-
-Investigation notes:
-
-- `embassy-silabs-bt-empty/BLE_BRINGUP.md` — init/pump evolution, diagnostics, and open RF issues
-- `ble-investigation-handoff.md` — concise handoff for resuming the advertising debug
+BLE advertising + memory LCD on BRD4186C/BRD4187C using the SDK BLE stack with an Embassy async pump and Rust `sl_bt_on_event` handler. See [`embassy-silabs-bt-empty/README.md`](embassy-silabs-bt-empty/README.md) for build instructions per board.
 
 #### `embassy-silabs-btmesh-project`
 
@@ -90,7 +71,7 @@ Workspace member reserved for a Bluetooth Mesh demo (not yet present in the tree
 | Path | Purpose |
 |------|---------|
 | `.vscode/` | Editor workspace for the Rust crates |
-| `reference_project/` | Local `bt_soc_empty` SDK copy for diffing against Silicon Labs reference apps (**gitignored**, not required to build) |
+| `reference_project/` | Local `bt_soc_empty` SDK copy for diffing (**gitignored**, not required to build) |
 
 ## Building
 

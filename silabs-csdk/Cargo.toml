@@ -7,6 +7,8 @@ links = "silabs_csdk"
 
 [features]
 default = []
+## EFR32MG24B210 (+10 dBm PA). Omit for B220 (+20 dBm) boards.
+mg24-b210 = []
 ble = []
 ## Application provides sl_bt_on_event + deferred adv start in Rust.
 ble-rust-handler = ["ble"]

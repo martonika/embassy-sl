@@ -17,6 +17,7 @@ unsafe extern "C" {
     fn silabs_ble_force_shm_link();
     fn silabs_bgapi_ble_adv_setup_status() -> u32;
     fn silabs_bgapi_ble_identity_address_read(out: *mut u8);
+    fn silabs_ble_post_adv_start_pump(rounds: u32);
 }
 
 /// BLE identity address (little-endian), updated after stack init.
@@ -43,7 +44,7 @@ pub fn read_ble_addr() -> [u8; 6] {
     ]
 }
 
-fn log_identity_and_adv() {
+fn refresh_identity_cache() {
     let mut addr = [0u8; 6];
     unsafe { silabs_bgapi_ble_identity_address_read(addr.as_mut_ptr()) };
     let adv4 = unsafe { silabs_bgapi_ble_adv_setup_status() };
@@ -51,15 +52,28 @@ fn log_identity_and_adv() {
         BLE_ADDR[i].store(*b, Ordering::Relaxed);
     }
     ADV_SETUP.store(adv4, Ordering::Relaxed);
-    info!(
-        "ble identity {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} adv4={:#010x}",
-        addr[5], addr[4], addr[3], addr[2], addr[1], addr[0], adv4
-    );
 }
+
+/// GAP device name from `gatt_configuration.btconf`.
+pub const DEVICE_NAME: &str = "Embassy BLE";
 
 /// Measured EM01GRPCCLK frequency for display SPI SDIV (via emlib).
 pub fn display_spi_ref_hz() -> u32 {
     unsafe { silabs_em01grpcclk_hz() }
+}
+
+pub fn log_ble_identity() {
+    let addr = read_ble_addr();
+    info!(
+        "ble advertising \"{}\" addr={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        DEVICE_NAME,
+        addr[5],
+        addr[4],
+        addr[3],
+        addr[2],
+        addr[1],
+        addr[0],
+    );
 }
 
 /// Full BLE stack bring-up. Call once from `main` before display init.
@@ -78,7 +92,12 @@ pub fn init_stack() {
     }
     unsafe { silabs_ble_post_stack_init_pump_finish() };
     unsafe { silabs_ble_force_shm_link() };
-    log_identity_and_adv();
+    // Init finish skips the post-adv LL pump; run it synchronously before tasks start.
+    unsafe { silabs_ble_post_adv_start_pump(64) };
+    for _ in 0..128 {
+        ble::step();
+    }
+    refresh_identity_cache();
 }
 
 fn pump_startup() {
@@ -106,6 +125,5 @@ pub fn spawn_ble_pump(spawner: &Spawner) {
 
 #[embassy_executor::task]
 async fn ble_pump_task() {
-    info!("ble pump task start");
     pump_run().await;
 }
