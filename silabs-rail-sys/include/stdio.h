@@ -1,0 +1,4 @@
+#ifndef SILABS_RAIL_SYS_STDIO_H
+#define SILABS_RAIL_SYS_STDIO_H
+
+#endif

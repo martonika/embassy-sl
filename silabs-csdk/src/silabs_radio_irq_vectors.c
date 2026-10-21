@@ -1,0 +1,26 @@
+/*
+ * cortex-m-rt device.x names vectors without the _IRQHandler suffix (e.g. MODEM).
+ * RAIL provides MODEM_IRQHandler. Thin wrappers wire vector table entries.
+ */
+#define SILABS_IRQ_VECTOR_WRAPPER(name) \
+  void name##_IRQHandler(void);         \
+  void name(void)                       \
+  {                                     \
+    name##_IRQHandler();                \
+  }
+
+SILABS_IRQ_VECTOR_WRAPPER(AGC);
+SILABS_IRQ_VECTOR_WRAPPER(BUFC);
+SILABS_IRQ_VECTOR_WRAPPER(EMUDG);
+SILABS_IRQ_VECTOR_WRAPPER(FRC_PRI);
+SILABS_IRQ_VECTOR_WRAPPER(FRC);
+SILABS_IRQ_VECTOR_WRAPPER(MODEM);
+SILABS_IRQ_VECTOR_WRAPPER(PROTIMER);
+SILABS_IRQ_VECTOR_WRAPPER(RAC_RSM);
+SILABS_IRQ_VECTOR_WRAPPER(RAC_SEQ);
+SILABS_IRQ_VECTOR_WRAPPER(HOSTMAILBOX);
+SILABS_IRQ_VECTOR_WRAPPER(SYNTH);
+SILABS_IRQ_VECTOR_WRAPPER(RFECA0);
+SILABS_IRQ_VECTOR_WRAPPER(RFECA1);
+SILABS_IRQ_VECTOR_WRAPPER(SYSRTC_SEQ);
+// SYSRTC_APP: provided by embassy-silabs time driver when _time-driver is enabled.

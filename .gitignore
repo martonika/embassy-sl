@@ -19,3 +19,7 @@ target/
 
 # Zed
 .zed/
+
+# Local Silicon Labs SDK / reference tree (not redistributed)
+reference_project/
+AGENTS.md

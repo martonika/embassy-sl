@@ -1,0 +1,22 @@
+#ifndef NVM3_DEFAULT_CONFIG_H
+#define NVM3_DEFAULT_CONFIG_H
+
+// Generated-style defaults (btmesh_soc_empty on BRD4186C).
+
+#ifndef NVM3_DEFAULT_CACHE_SIZE
+#define NVM3_DEFAULT_CACHE_SIZE 200
+#endif
+
+#ifndef NVM3_DEFAULT_MAX_OBJECT_SIZE
+#define NVM3_DEFAULT_MAX_OBJECT_SIZE 254
+#endif
+
+#ifndef NVM3_DEFAULT_REPACK_HEADROOM
+#define NVM3_DEFAULT_REPACK_HEADROOM 0
+#endif
+
+#ifndef NVM3_DEFAULT_NVM_SIZE
+#define NVM3_DEFAULT_NVM_SIZE 0x6000
+#endif
+
+#endif

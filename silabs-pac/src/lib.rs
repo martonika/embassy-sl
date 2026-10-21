@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![allow(clippy::all)]
 #![no_std]
 #![doc = "Peripheral access API (generated using chiptool v0.1.0 (6651cd0 2025-05-06))"]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -140,6 +141,16 @@ mod _vectors {
         fn I2C0();
         fn I2C1();
         fn EMUDG();
+        fn AGC();
+        fn BUFC();
+        fn FRC_PRI();
+        fn FRC();
+        fn MODEM();
+        fn PROTIMER();
+        fn RAC_RSM();
+        fn RAC_SEQ();
+        fn HOSTMAILBOX();
+        fn SYNTH();
         fn ACMP0();
         fn ACMP1();
         fn WDOG0();
@@ -218,16 +229,16 @@ mod _vectors {
         Vector { _handler: I2C0 },
         Vector { _handler: I2C1 },
         Vector { _handler: EMUDG },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
-        Vector { _reserved: 0 },
+        Vector { _handler: AGC },
+        Vector { _handler: BUFC },
+        Vector { _handler: FRC_PRI },
+        Vector { _handler: FRC },
+        Vector { _handler: MODEM },
+        Vector { _handler: PROTIMER },
+        Vector { _handler: RAC_RSM },
+        Vector { _handler: RAC_SEQ },
+        Vector { _handler: HOSTMAILBOX },
+        Vector { _handler: SYNTH },
         Vector { _handler: ACMP0 },
         Vector { _handler: ACMP1 },
         Vector { _handler: WDOG0 },
